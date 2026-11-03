@@ -8,3 +8,9 @@ members = [
     "crates/mytheclipse-cli",
 ]
 resolver = "2"
+# Only affects artifacts this workspace builds (bins, tests, benches) — a
+# dependency's profile is chosen by its own workspace, so this does not change
+# what a downstream user gets.
+[profile.release]
+lto = "thin"
+codegen-units = 1
