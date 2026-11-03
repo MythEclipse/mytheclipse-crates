@@ -42,6 +42,38 @@ mytheclipse-crypto = "0.1"
 See each crate's own README (linked above) for usage examples and the full
 feature-flag list.
 
+## Performance
+
+Two criterion suites cover the hot primitives. Neither is a correctness gate —
+run them before and after a change to the code they measure:
+
+```bash
+cargo bench -p mytheclipse --bench primitives --all-features
+cargo bench -p mytheclipse-cache --bench cache
+```
+
+Reference numbers on an AMD Ryzen 9 (Linux, release profile). Treat them as a
+regression baseline, not an absolute target:
+
+| primitive | time |
+| --- | --- |
+| `circuit_breaker` closed allow+record | 4.8 ns |
+| `metrics` inc_counter / observe | 20 ns |
+| `shutdown_guard` new+drop | 27 ns |
+| `backpressure` push+pop | 35 ns |
+| `rate_limiter` try_acquire | 36 ns |
+| `cache` get hit / miss | 59 ns / 45 ns |
+| `semaphore_pool` acquire+release | 114 ns |
+| `dlock` acquire+release (1k live keys) | 147 ns |
+| `cache` set at capacity (evict) | 130 ns |
+| `cron` next_after, hourly / yearly | 0.75 µs / 2.0 µs |
+| `metrics` export_prometheus (64 series) | 11 µs |
+| `parallel_map` 1000 items @ 8 | 130 µs |
+
+`parallel_map` and `parallel_for_each` spawn `concurrency` workers that pull
+from a shared iterator rather than one task per item, which is what keeps the
+1000-item case at 130 µs instead of 527 µs.
+
 ## Development
 
 This is a Cargo workspace; run commands from the repository root:
