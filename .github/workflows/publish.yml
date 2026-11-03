@@ -1,53 +1,53 @@
 name: Publish to crates.io
 
 on:
-  push:
-    tags: ["v*.*.*"]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Git tag to publish (e.g. v0.2.0). Defaults to latest tag."
-        required: false
-        type: string
-  workflow_call:
-    inputs:
-      tag:
-        description: "Git tag to publish."
-        required: true
-        type: string
-    secrets:
-      CARGO_REGISTRY_TOKEN:
-        required: true
+ push:
+  tags: ["v*.*.*"]
+ workflow_dispatch:
+  inputs:
+   tag:
+    description: "Git tag to publish (e.g. v0.2.0). Defaults to latest tag."
+    required: false
+    type: string
+ workflow_call:
+  inputs:
+   tag:
+    description: "Git tag to publish."
+    required: true
+    type: string
+  secrets:
+   CARGO_REGISTRY_TOKEN:
+    required: true
 
 permissions:
-  contents: read
+ contents: read
 
 jobs:
-  publish:
-    name: Publish
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tag || github.event.ref || github.ref }}
-          fetch-depth: 0
+ publish:
+  name: Publish
+  runs-on: ubuntu-24.04
+  steps:
+   - uses: actions/checkout@v5
+    with:
+     ref: ${{ inputs.tag || github.event.ref || github.ref }}
+     fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+   - uses: dtolnay/rust-toolchain@stable
 
-      # The workspace crates have no interdependencies, so publish order
-      # doesn't matter for crates.io dependency resolution. A brief sleep
-      # between publishes avoids hitting crates.io's rate limit. Re-publishing
-      # an already-uploaded version is tolerated (idempotent re-runs).
-      - name: Publish workspace crates
-        run: |
-          for crate in mytheclipse mytheclipse-cache mytheclipse-event mytheclipse-queue mytheclipse-tracing; do
-            echo "Publishing $crate..."
-            if cargo publish -p "$crate" --allow-dirty --no-verify; then
-              echo "$crate published OK"
-            else
-              echo "$crate: publish failed (already uploaded or error)"
-            fi
-            sleep 15
-          done
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+   # The workspace crates have no interdependencies, so publish order
+   # doesn't matter for crates.io dependency resolution. A brief sleep
+   # between publishes avoids hitting crates.io's rate limit. Re-publishing
+   # an already-uploaded version is tolerated (idempotent re-runs).
+   - name: Publish workspace crates
+    run: |
+     for crate in mytheclipse mytheclipse-cache mytheclipse-event mytheclipse-queue mytheclipse-tracing; do
+      echo "Publishing $crate..."
+      if cargo publish -p "$crate" --allow-dirty --no-verify; then
+       echo "$crate published OK"
+      else
+       echo "$crate: publish failed (already uploaded or error)"
+      fi
+      sleep 15
+     done
+    env:
+     CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

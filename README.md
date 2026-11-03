@@ -16,7 +16,6 @@ concern.
 | [`mytheclipse-event`](crates/mytheclipse-event) | Unified events & message bus abstraction: in-memory pub/sub dispatcher plus RabbitMQ and NATS broker adapters behind one trait. | [README](crates/mytheclipse-event/README.md) |
 | [`mytheclipse-queue`](crates/mytheclipse-queue) | Job queue abstraction with WorkerPool executor, retry/backoff, and dead-letter support. In-memory backend only; `Queue` is a trait for adding another transport. | [README](crates/mytheclipse-queue/README.md) |
 | [`mytheclipse-tracing`](crates/mytheclipse-tracing) | Pre-built `tracing-subscriber` fmt layer with `RUST_LOG` filtering, installed in one call. | [README](crates/mytheclipse-tracing/README.md) |
-| [`mytheclipse-cli`](crates/mytheclipse-cli) | CLI framework for mytheclipse applications with built-in subcommands (serve, worker, migrate, health, version). Workspace-only — not published to crates.io. | [README](crates/mytheclipse-cli/README.md) |
 
 Every crate follows the same philosophy: **one small interface, pluggable
 backends behind feature flags, and a working default that needs no external

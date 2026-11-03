@@ -5,7 +5,6 @@ members = [
     "crates/mytheclipse-event",
     "crates/mytheclipse-queue",
     "crates/mytheclipse-tracing",
-    "crates/mytheclipse-cli",
 ]
 resolver = "2"
 # Only affects artifacts this workspace builds (bins, tests, benches) — a
