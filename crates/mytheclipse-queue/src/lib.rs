@@ -1,14 +1,14 @@
 //! # mytheclipse-queue
 //!
 //! A unified job queue abstraction so your background work isn't locked to one
-//! transport. Provides a single `Queue` trait, `Job` type, and `WorkerPool`
+//! transport. Provides a single [`Queue`] trait, [`Job`] type, and `WorkerPool`
 //! executor with configurable retry/backoff, concurrency, and a dead-letter
-//! queue — behind pluggable backends:
+//! queue.
 //!
-//! - **In-memory** (default) — `tokio::sync::mpsc` + task spawning, no external service.
-//! - **Redis** (`redis`) — LIST-based queue with atomic moves.
-//! - **NATS JetStream** (`nats`) — durable consumer with ACK/NACK.
-//! - **PostgreSQL** (`postgres`) — `SKIP LOCKED` polling.
+//! The in-memory backend (`InMemoryQueue`, feature `in-memory`) is the one that
+//! exists today: `tokio::sync::mpsc` plus task spawning, no external service.
+//! The `redis`, `nats`, and `postgres` features are declared but have no backend
+//! implementation yet — see the README.
 
 pub mod error;
 #[cfg(feature = "in-memory")]
@@ -17,6 +17,14 @@ pub mod job;
 pub mod traits;
 #[cfg(feature = "in-memory")]
 pub mod worker;
+
+pub use error::{JobError, QueueError};
+#[cfg(feature = "in-memory")]
+pub use in_memory::InMemoryQueue;
+pub use job::{Job, JobId};
+pub use traits::Queue;
+#[cfg(feature = "in-memory")]
+pub use worker::{JobFuture, JobHandler, WorkerConfig, WorkerPool};
 
 #[cfg(feature = "in-memory")]
 pub mod backpressure_enqueue;
