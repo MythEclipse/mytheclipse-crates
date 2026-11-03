@@ -1,11 +1,15 @@
 //! A simple, dependency-free in-process cache (L1, `l1-memory`).
 //!
-//! Backed by a `HashMap<String, Entry>` guarded by a single `Mutex`. Entries
-//! are lazily expired on access by comparing against `Instant`; a monotonic
-//! clock keeps TTLs robust against wall-clock discontinuities.
+//! Backed by a `HashMap<String, Entry>` guarded by a single `RwLock`: reads
+//! take the lock shared, so readers never wait on each other, while every
+//! mutation (insert, evict, expire) holds it exclusively and therefore sees a
+//! consistent map + insertion order. Entries are lazily expired on
+//! access by comparing against `Instant`; a monotonic clock keeps TTLs robust
+//! against wall-clock discontinuities, and an entry with no TTL never reads
+//! the clock at all.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -76,7 +80,7 @@ impl State {
 /// (least-recently-inserted) entry is evicted.
 #[derive(Debug, Clone)]
 pub struct MemoryCache {
-    state: Arc<Mutex<State>>,
+    state: Arc<RwLock<State>>,
     /// When `Some(n)`, the cache refuses more than `n` live entries and evicts
     /// the oldest on overflow. `None` = unbounded (legacy default).
     max_entries: Option<usize>,
@@ -85,7 +89,7 @@ pub struct MemoryCache {
 impl Default for MemoryCache {
     fn default() -> Self {
         Self {
-            state: Arc::new(Mutex::new(State::new())),
+            state: Arc::new(RwLock::new(State::new())),
             max_entries: None,
         }
     }
@@ -99,7 +103,7 @@ impl MemoryCache {
 
     /// Pre-allocates space for `capacity` entries to reduce reallocation.
     pub fn with_capacity(self, capacity: usize) -> Self {
-        self.state.lock().unwrap().map.reserve(capacity);
+        self.state.write().unwrap().map.reserve(capacity);
         self
     }
 
@@ -124,17 +128,37 @@ impl MemoryCache {
 #[async_trait]
 impl Cache for MemoryCache {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError> {
-        let mut state = self.state.lock().unwrap();
-        let now = Instant::now();
-        let expired = state
+        // Fast path: one probe under a shared lock. The clock is only read for
+        // entries that actually carry a TTL, so a cache of immortal entries
+        // never pays for `Instant::now`.
+        {
+            let state = self.state.read().unwrap();
+            match state.map.get(key) {
+                None => return Ok(None),
+                Some(entry) => {
+                    let fresh = match entry.expires {
+                        None => true,
+                        Some(at) => at > Instant::now(),
+                    };
+                    if fresh {
+                        return Ok(Some(entry.value.clone()));
+                    }
+                }
+            }
+        }
+
+        // Slow path: the entry is stale, so drop it under the exclusive lock.
+        // A racing `set` may have replaced it in between — re-check before
+        // removing so a fresh value is never evicted by a stale observation.
+        let mut state = self.state.write().unwrap();
+        if state
             .map
             .get(key)
-            .is_some_and(|entry| entry.expires.is_some_and(|at| at <= now));
-        if expired {
+            .is_some_and(|entry| entry.expires.is_some_and(|at| at <= Instant::now()))
+        {
             state.map.remove(key);
-            return Ok(None);
         }
-        Ok(state.map.get(key).map(|entry| entry.value.clone()))
+        Ok(None)
     }
 
     async fn set(
@@ -144,7 +168,7 @@ impl Cache for MemoryCache {
         ttl: Option<Duration>,
     ) -> Result<(), CacheError> {
         let expires = ttl.map(|d| Instant::now() + d);
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.write().unwrap();
         let seq = state.next_seq;
         state.next_seq += 1;
         state.map.insert(
@@ -166,12 +190,12 @@ impl Cache for MemoryCache {
 
     async fn invalidate(&self, key: &str) -> Result<(), CacheError> {
         // O(1): the key's order slot becomes stale and is skipped on eviction.
-        self.state.lock().unwrap().map.remove(key);
+        self.state.write().unwrap().map.remove(key);
         Ok(())
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.write().unwrap();
         state.map.clear();
         state.order.clear();
         Ok(())
@@ -294,7 +318,7 @@ mod tests {
         c.set("other", b"o".to_vec(), None).await.unwrap();
         c.set("third", b"t".to_vec(), None).await.unwrap();
 
-        let state = c.state.lock().unwrap();
+        let state = c.state.read().unwrap();
         assert_eq!(state.map.len(), 2);
         assert!(state.order.len() <= 2 * COMPACT_FACTOR);
         // "hot" holds the oldest live insertion, so it is the evicted one.
@@ -309,7 +333,7 @@ mod tests {
         for i in 0..10 {
             c.set(&format!("k{i}"), b"v".to_vec(), None).await.unwrap();
         }
-        assert!(c.state.lock().unwrap().order.is_empty());
+        assert!(c.state.read().unwrap().order.is_empty());
     }
 
     #[cfg(feature = "cache-aside")]
