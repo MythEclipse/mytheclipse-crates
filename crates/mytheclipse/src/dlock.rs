@@ -4,11 +4,11 @@
 //! Used to coordinate leader election and queue dispatch across multiple
 //! worker instances.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::Mutex;
 
 /// Errors returned by distributed lock operations.
 #[derive(Debug)]
@@ -33,13 +33,28 @@ impl std::fmt::Display for LockError {
 
 impl std::error::Error for LockError {}
 
-/// Shared state for an in-process lock entry — maps keys to expiry instants.
-type LockMap = Arc<Mutex<std::collections::HashMap<String, Instant>>>;
+/// One held lease: when it expires, and the fencing token of the guard that
+/// took it (so a stale guard cannot release or extend someone else's lease).
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    expires: Instant,
+    token: u64,
+}
+
+/// Shared state for an in-process lock — maps keys to their lease.
+#[derive(Default)]
+struct LockState {
+    held: HashMap<String, Held>,
+    next_token: u64,
+}
+
+type LockMap = Arc<Mutex<LockState>>;
 
 /// A handle to an acquired distributed lock (RAII — releases on drop).
 pub struct LockGuard {
     map: LockMap,
     key: String,
+    token: u64,
 }
 
 impl LockGuard {
@@ -47,21 +62,31 @@ impl LockGuard {
         &self.key
     }
 
-    /// Attempts to extend the lease.
-    pub async fn extend(&mut self, _dur: Duration) -> Result<(), LockError> {
-        Err(LockError::Expired)
+    /// Extends the lease, provided this guard still owns the lock.
+    pub async fn extend(&mut self, dur: Duration) -> Result<(), LockError> {
+        let mut state = self.map.lock().unwrap();
+        match state.held.get_mut(&self.key) {
+            Some(held) if held.token == self.token => {
+                held.expires = Instant::now() + dur;
+                Ok(())
+            }
+            _ => Err(LockError::Expired),
+        }
     }
 }
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        let map = Arc::clone(&self.map);
-        let key = self.key.clone();
-        // Fire-and-forget release: spawn a detached task to remove the key.
-        tokio::spawn(async move {
-            let mut m = map.lock().await;
-            m.remove(&key);
-        });
+        // Synchronous release: no runtime handle needed, so a guard dropped
+        // during shutdown (or outside a runtime) still frees the key.
+        let mut state = self.map.lock().unwrap();
+        if state
+            .held
+            .get(&self.key)
+            .is_some_and(|held| held.token == self.token)
+        {
+            state.held.remove(&self.key);
+        }
     }
 }
 
@@ -92,7 +117,7 @@ pub struct InProcLock {
 impl InProcLock {
     pub fn new() -> Self {
         Self {
-            held: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            held: Arc::new(Mutex::new(LockState::default())),
         }
     }
 }
@@ -113,17 +138,34 @@ impl DistributedLock for InProcLock {
     ) -> Result<LockGuard, LockError> {
         let deadline = Instant::now() + timeout;
         loop {
-            {
-                let mut map = self.held.lock().await;
-                // Clean up expired entries lazily.
-                map.retain(|_, v| *v > Instant::now());
-                if !map.contains_key(key) {
-                    map.insert(key.to_string(), Instant::now() + lease);
-                    return Ok(LockGuard {
-                        map: Arc::clone(&self.held),
-                        key: key.to_string(),
-                    });
+            let token = {
+                let mut state = self.held.lock().unwrap();
+                let now = Instant::now();
+                // Lazy per-key expiry: only the key being acquired is examined,
+                // so acquisition stays O(1) regardless of how many other leases
+                // the lock is tracking.
+                let free = state.held.get(key).map_or(true, |held| held.expires <= now);
+                if free {
+                    let token = state.next_token;
+                    state.next_token += 1;
+                    state.held.insert(
+                        key.to_string(),
+                        Held {
+                            expires: now + lease,
+                            token,
+                        },
+                    );
+                    Some(token)
+                } else {
+                    None
                 }
+            };
+            if let Some(token) = token {
+                return Ok(LockGuard {
+                    map: Arc::clone(&self.held),
+                    key: key.to_string(),
+                    token,
+                });
             }
             if Instant::now() >= deadline {
                 return Err(LockError::AlreadyHeld);
@@ -133,18 +175,18 @@ impl DistributedLock for InProcLock {
     }
 
     async fn release(&self, key: &str) -> Result<(), LockError> {
-        let mut map = self.held.lock().await;
-        map.remove(key);
+        self.held.lock().unwrap().held.remove(key);
         Ok(())
     }
 
     async fn extend(&self, key: &str, lease: Duration) -> Result<(), LockError> {
-        let mut map = self.held.lock().await;
-        if let Some(entry) = map.get_mut(key) {
-            *entry = Instant::now() + lease;
-            Ok(())
-        } else {
-            Err(LockError::AlreadyHeld)
+        let mut state = self.held.lock().unwrap();
+        match state.held.get_mut(key) {
+            Some(held) => {
+                held.expires = Instant::now() + lease;
+                Ok(())
+            }
+            None => Err(LockError::AlreadyHeld),
         }
     }
 }
@@ -208,5 +250,43 @@ mod tests {
             .acquire("key", Duration::from_millis(20), Duration::from_millis(5))
             .await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn guard_extend_keeps_the_lease_alive() {
+        let lock = InProcLock::new();
+        let mut guard = lock
+            .acquire("k", Duration::from_millis(20), Duration::from_millis(5))
+            .await
+            .unwrap();
+        guard.extend(Duration::from_secs(5)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        // Past the original lease, still held because it was extended.
+        assert!(lock
+            .acquire("k", Duration::from_secs(1), Duration::from_millis(20))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn stale_guard_does_not_release_the_new_holder() {
+        let lock = InProcLock::new();
+        let stale = lock
+            .acquire("k", Duration::from_millis(10), Duration::from_millis(5))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let fresh = lock
+            .acquire("k", Duration::from_secs(5), Duration::from_millis(50))
+            .await
+            .unwrap();
+        drop(stale);
+        assert!(
+            lock.acquire("k", Duration::from_secs(1), Duration::from_millis(20))
+                .await
+                .is_err(),
+            "dropping an expired guard must not free the live lease"
+        );
+        drop(fresh);
     }
 }
