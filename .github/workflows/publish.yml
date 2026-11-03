@@ -9,6 +9,15 @@ on:
         description: "Git tag to publish (e.g. v0.2.0). Defaults to latest tag."
         required: false
         type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: "Git tag to publish."
+        required: true
+        type: string
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        required: true
 
 permissions:
   contents: read

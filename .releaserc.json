@@ -10,7 +10,7 @@
       "@semantic-release/exec",
       {
         "prepareCmd": "for f in crates/*/Cargo.toml; do sed -i 's/^version = \\\"[^\\\"]*\\\"/version = \\\"${nextRelease.version}\\\"/' \"$f\"; done && cargo check --workspace",
-        "successCmd": "gh api -X POST repos/MythEclipse/mytheclipse-crates/actions/workflows/publish.yml/dispatches -f ref=main -f 'inputs[tag]=v${nextRelease.version}'"
+        "successCmd": "echo \"version=${nextRelease.version}\" >> \"$GITHUB_OUTPUT\""
       }
     ],
     [
