@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 
 use mytheclipse::aggregate_error::AggregateError;
@@ -34,7 +34,7 @@ fn bench_parallel_map(c: &mut Criterion) {
             let out = parallel_map(items, 8, |x| async move { Ok::<_, std::io::Error>(x * 2) })
                 .await
                 .unwrap();
-            black_box(out);
+            let _ = black_box(out);
         });
     });
 
@@ -157,7 +157,7 @@ fn bench_aggregate_error(c: &mut Criterion) {
                 })
                 .collect();
             let out = AggregateError::from_results(black_box(results));
-            black_box(out);
+            let _ = black_box(out);
         });
     });
 }

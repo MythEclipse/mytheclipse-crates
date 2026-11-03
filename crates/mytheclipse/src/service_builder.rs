@@ -288,8 +288,10 @@ mod tests {
     #[cfg(feature = "resiliency")]
     #[tokio::test]
     async fn retry_succeeds_after_transient_failure() {
-        let mut cfg = ServiceConfig::default();
-        cfg.max_attempts = 3;
+        let cfg = ServiceConfig {
+            max_attempts: 3,
+            ..Default::default()
+        };
         let builder = ServiceBuilder::new(cfg);
         let attempts = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let result = builder
@@ -310,8 +312,10 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_returns_timeout_error() {
-        let mut cfg = ServiceConfig::default();
-        cfg.timeout = Duration::from_millis(5);
+        let cfg = ServiceConfig {
+            timeout: Duration::from_millis(5),
+            ..Default::default()
+        };
         let builder = ServiceBuilder::new(cfg);
         let result = builder
             .run(|| {

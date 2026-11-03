@@ -35,21 +35,13 @@ async fn rate_limited_queue_no_item_loss_under_contention() {
         let q = Arc::clone(&q);
         let s = Arc::clone(&seen);
         workers.push(tokio::spawn(async move {
-            loop {
-                match q
-                    .dequeue("stress", Duration::from_millis(50))
-                    .await
-                    .unwrap()
-                {
-                    Some(job) => {
-                        let _ = String::from_utf8(job.payload).unwrap();
-                        s.fetch_add(1, Ordering::SeqCst);
-                    }
-                    None => {
-                        // Empty + producer done => we're finished.
-                        break;
-                    }
-                }
+            while let Some(job) = q
+                .dequeue("stress", Duration::from_millis(50))
+                .await
+                .unwrap()
+            {
+                let _ = String::from_utf8(job.payload).unwrap();
+                s.fetch_add(1, Ordering::SeqCst);
             }
         }));
     }

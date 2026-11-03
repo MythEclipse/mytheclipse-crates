@@ -135,8 +135,10 @@ mod tests {
 
     #[tokio::test]
     async fn auto_metrics_records_call() {
-        let mut cfg = ServiceConfig::default();
-        cfg.max_attempts = 3;
+        let cfg = ServiceConfig {
+            max_attempts: 3,
+            ..Default::default()
+        };
         let builder = AutoMetricsServiceBuilder::new("test_svc", cfg);
 
         let attempts = Arc::new(AtomicU32::new(0));
@@ -157,6 +159,6 @@ mod tests {
         assert_eq!(result.unwrap(), 42);
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
         let snap = builder.collector().snapshot();
-        assert!(snap.counters.len() >= 1);
+        assert!(!snap.counters.is_empty());
     }
 }

@@ -140,8 +140,8 @@ mod tests {
     #[test]
     fn aggregates_multiple_errors() {
         let mut agg = AggregateError::with_context("batch_delete");
-        agg.push(std::io::Error::new(std::io::ErrorKind::Other, "row 1"));
-        agg.push(std::io::Error::new(std::io::ErrorKind::Other, "row 2"));
+        agg.push(std::io::Error::other("row 1"));
+        agg.push(std::io::Error::other("row 2"));
         assert_eq!(agg.len(), 2);
         assert!(!agg.is_empty());
         let s = agg.to_string();
@@ -153,9 +153,9 @@ mod tests {
     fn extracts_errors_from_results() {
         let results: Vec<Result<u32, std::io::Error>> = vec![
             Ok(1),
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "a")),
+            Err(std::io::Error::other("a")),
             Ok(2),
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "b")),
+            Err(std::io::Error::other("b")),
         ];
         let out = AggregateError::from_results(results);
         assert!(out.is_err());

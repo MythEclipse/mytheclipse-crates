@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(snap.successes, 0);
 
         // success in Closed state resets failure count (no failure counter added).
-        b.call::<(), u8, _>(|| Ok(()));
+        let _ = b.call::<(), u8, _>(|| Ok(()));
         let snap2 = b.snapshot();
         assert_eq!(snap2.state, CircuitState::Closed);
 

@@ -107,6 +107,6 @@ mod tests {
             })
         });
         p.add(reject);
-        assert!(matches!(p.apply("x".to_string()).await, Err(_)));
+        assert!(p.apply("x".to_string()).await.is_err());
     }
 }

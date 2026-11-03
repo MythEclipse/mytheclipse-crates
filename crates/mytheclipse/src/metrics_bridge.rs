@@ -139,7 +139,6 @@ impl MetricsBridge {
 mod tests {
     use super::*;
     use crate::metrics::MetricsCollector;
-    use crate::shutdown::ShutdownManager;
 
     #[test]
     fn metrics_health_ok_when_no_counters() {

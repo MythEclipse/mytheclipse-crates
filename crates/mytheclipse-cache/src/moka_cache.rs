@@ -115,6 +115,6 @@ mod tests {
         assert_eq!(c.get("k").await.unwrap(), Some(b"v".to_vec()));
         tokio::time::sleep(Duration::from_millis(120)).await;
         let v = c.get("k").await.unwrap();
-        assert!(matches!(v, None));
+        assert!(v.is_none());
     }
 }

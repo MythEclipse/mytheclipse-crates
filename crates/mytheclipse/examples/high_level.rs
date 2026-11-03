@@ -91,8 +91,10 @@ async fn main() {
     println!("5. AutoReconnectPool first acquire -> {first}");
 
     // 6. AutoMetricsServiceBuilder — auto records latency + outcome counters.
-    let mut svc_cfg = ServiceConfig::default();
-    svc_cfg.max_attempts = 2;
+    let svc_cfg = ServiceConfig {
+        max_attempts: 2,
+        ..Default::default()
+    };
     let svc = AutoMetricsServiceBuilder::new("demo_op", svc_cfg);
     let n = Arc::new(AtomicU32::new(0));
     let n2 = Arc::clone(&n);

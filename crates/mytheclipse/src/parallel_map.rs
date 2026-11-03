@@ -297,7 +297,7 @@ mod tests {
     async fn aggregates_errors_from_failing_tasks() {
         let out = parallel_map(vec![1, 2, 3], 4, |x: i32| async move {
             if x == 2 {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "boom"))
+                Err(std::io::Error::other("boom"))
             } else {
                 Ok::<_, std::io::Error>(x)
             }

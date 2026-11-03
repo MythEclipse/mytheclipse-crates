@@ -56,8 +56,5 @@ async fn run(label: &str, concurrency: impl ParallelConcurrency + Copy, total: u
         "  peak in-flight = {} (bounded, never {total})",
         peak.load(Ordering::SeqCst)
     );
-    println!(
-        "  elapsed        = {elapsed:?}  (sequential ~{}ms)",
-        total * 1
-    );
+    println!("  elapsed        = {elapsed:?}  (sequential ~{}ms)", total);
 }

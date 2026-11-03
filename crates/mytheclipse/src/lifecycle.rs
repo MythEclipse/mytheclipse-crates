@@ -137,19 +137,6 @@ mod tests {
         }
     }
 
-    struct AlwaysBad;
-    impl HealthCheck for AlwaysBad {
-        fn name(&self) -> &str {
-            "always-bad"
-        }
-        fn check(
-            &self,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = HealthStatus> + Send + '_>>
-        {
-            Box::pin(async { HealthStatus::Unhealthy })
-        }
-    }
-
     #[tokio::test]
     async fn new_manager_has_no_checks() {
         let mgr = AsyncLifecycleManager::new();
@@ -170,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_signal_fires_on_request() {
         let mgr = AsyncLifecycleManager::new();
-        let mut sig = mgr.shutdown_signal();
+        let sig = mgr.shutdown_signal();
         assert!(!sig.is_shutdown());
         mgr.request_shutdown();
         assert!(sig.is_shutdown());
