@@ -17,7 +17,6 @@ categories = ["caching", "asynchronous"]
 default = ["l1-memory", "cache-aside"]
 # L1 (in-process) backends.
 l1-memory = []
-l1-moka = ["l1-memory", "dep:moka"]
 # L2 (distributed) backends.
 l2-redis = ["l1-memory", "dep:redis"]
 # Cache-aside + auto-refresh helper.
@@ -29,9 +28,6 @@ tracing = "0.1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-
-# L1: Moka (high-performance in-memory cache).
-moka = { version = "0.12", default-features = false, features = ["future"], optional = true }
 
 # L2: Redis/Valkey async client (multiplexed connection).
 redis = { version = "0.32", default-features = false, features = ["tokio-comp"], optional = true }

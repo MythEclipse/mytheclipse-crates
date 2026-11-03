@@ -4,7 +4,7 @@
 //! being locked to any single cache provider.
 //!
 //! - **L1 (in-process) caches**: [`memory::MemoryCache`] (zero-dependency,
-//!   default) or [`moka_cache::MokaL1`] (high-performance, TTL/max-capacity).
+//!   default).
 //! - **L2 (distributed) caches**: [`redis::RedisCache`] backed by Redis/Valkey.
 //! - **Multi-layer composition**: [`multilayer::MultiLayerCache`] layers an L1
 //!   over an L2 behind one [`Cache`] face; reads fall through to L2 and
@@ -48,9 +48,6 @@ pub mod traits;
 #[cfg(feature = "l1-memory")]
 pub mod memory;
 
-#[cfg(feature = "l1-moka")]
-pub mod moka_cache;
-
 #[cfg(feature = "l2-redis")]
 pub mod redis;
 
@@ -70,9 +67,6 @@ pub use traits::{Cache, CacheError};
 
 #[cfg(feature = "l1-memory")]
 pub use memory::MemoryCache;
-
-#[cfg(feature = "l1-moka")]
-pub use moka_cache::MokaL1;
 
 #[cfg(feature = "l2-redis")]
 pub use redis::RedisCache;

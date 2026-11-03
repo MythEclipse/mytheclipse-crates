@@ -8,7 +8,6 @@ provider. Combines an in-process **L1** cache with a distributed **L2** cache
 ## Features
 
 - `l1-memory` (default) — zero-dependency in-process cache.
-- `l1-moka` — high-performance Moka-backed L1 with TTL/max-capacity.
 - `l2-redis` — Redis/Valkey L2 via `fred`.
 - `cache-aside` (default) — read-through cache-aside helper.
 
