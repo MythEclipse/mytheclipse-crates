@@ -1,3 +1,10 @@
+## [1.21.4](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.3...v1.21.4) (2026-11-03)
+
+
+### Bug Fixes
+
+* **ci:** publish crates from the release workflow ([eb44987](https://github.com/MythEclipse/mytheclipse-crates/commit/eb449876302ddb023b2dc75b321ad32d775a83bc))
+
 ## [1.21.3](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.2...v1.21.3) (2026-11-03)
 
 
