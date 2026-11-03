@@ -21,7 +21,10 @@ pub enum MytheclipseError {
     CircuitOpen,
     /// A retry loop gave up after exhausting its maximum attempts
     /// ([`crate::retry()`]). The contained count is the number of attempts made.
-    RetryExhausted { attempts: u32 },
+    RetryExhausted {
+        /// Attempts made, including the first.
+        attempts: u32,
+    },
     /// A request was refused because the rate limiter had no tokens left
     /// ([`crate::ratelimit`]).
     RateLimited,

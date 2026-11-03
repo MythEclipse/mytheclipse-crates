@@ -12,6 +12,8 @@
 
 use std::sync::{Arc, Mutex};
 
+type GuardFn = Box<dyn FnOnce() + Send>;
+
 /// An RAII guard that invokes a notification callback exactly once when
 /// dropped.
 ///
@@ -39,8 +41,6 @@ use std::sync::{Arc, Mutex};
 /// ```
 // Type alias for the stored once-only callback, so the nested Arc<Mutex<…>> field type
 // stays within clippy's `type_complexity` threshold.
-type GuardFn = Box<dyn FnOnce() + Send>;
-
 pub struct ShutdownGuard {
     inner: Arc<Mutex<Option<GuardFn>>>,
 }

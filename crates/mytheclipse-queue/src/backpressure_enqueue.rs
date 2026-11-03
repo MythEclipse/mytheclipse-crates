@@ -15,7 +15,10 @@ use crate::traits::Queue;
 #[derive(Debug)]
 pub enum BackpressureError {
     /// The configured per-topic cap was reached; enqueue rejected.
-    LimitReached { topic: String },
+    LimitReached {
+        /// The topic whose cap was reached.
+        topic: String,
+    },
     /// The underlying queue rejected the enqueue.
     Enqueue(QueueError),
 }

@@ -58,6 +58,7 @@ pub struct LockGuard {
 }
 
 impl LockGuard {
+    /// The key this guard holds.
     pub fn key(&self) -> &str {
         &self.key
     }
@@ -115,6 +116,7 @@ pub struct InProcLock {
 }
 
 impl InProcLock {
+    /// Creates a lock with nothing held.
     pub fn new() -> Self {
         Self {
             held: Arc::new(Mutex::new(LockState::default())),

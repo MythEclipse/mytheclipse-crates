@@ -69,6 +69,7 @@ impl Default for InMemoryQueue {
 }
 
 impl InMemoryQueue {
+    /// Creates an empty queue with no topics.
     pub fn new() -> Self {
         Self {
             topics: Arc::new(RwLock::new(HashMap::new())),

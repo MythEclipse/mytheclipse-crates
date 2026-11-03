@@ -24,6 +24,7 @@ pub struct InProcLeaderElection {
 }
 
 impl InProcLeaderElection {
+    /// Creates an election nobody has won yet.
     pub fn new() -> Self {
         Self {
             leader: Arc::new(tokio::sync::Mutex::new(false)),

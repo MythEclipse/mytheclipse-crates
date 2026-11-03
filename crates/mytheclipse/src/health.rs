@@ -8,8 +8,11 @@ use tokio::sync::RwLock;
 /// Status levels returned by health checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HealthStatus {
+    /// Serving normally.
     Ok,
+    /// Serving, but something upstream is impaired.
     Degraded,
+    /// Not able to serve.
     Unhealthy,
 }
 
@@ -25,7 +28,10 @@ impl fmt::Display for HealthStatus {
 
 /// A single health check.
 pub trait HealthCheck: Send + Sync {
+    /// The name this check reports under, e.g. `connection-pool:primary`.
     fn name(&self) -> &str;
+
+    /// Runs the check and reports the current status.
     fn check(
         &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = HealthStatus> + Send + '_>>;
@@ -44,12 +50,17 @@ pub struct HealthRegistry {
 }
 
 impl HealthRegistry {
+    /// Creates a registry with no checks registered.
     pub fn new() -> Self {
         Self {
             checks: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
+    /// Adds `check` under `name`.
+    ///
+    /// Re-registering the same name adds a second entry rather than replacing
+    /// the first; [`check_all`](Self::check_all) reports both.
     pub async fn register(&self, name: impl Into<String>, check: impl HealthCheck + 'static) {
         let mut checks = self.checks.write().await;
         checks.push(RegisteredCheck {

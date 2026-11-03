@@ -13,13 +13,16 @@ use tokio::task::JoinHandle;
 /// A single transform in the pipeline.
 #[async_trait]
 pub trait Stage<I: Send + 'static, O: Send + 'static>: Send + Sync {
+    /// Transforms one input into one output, or fails the stage.
     async fn process(&self, input: I) -> Result<O, StageError>;
 }
 
 /// Errors from pipeline stages.
 #[derive(Debug)]
 pub enum StageError {
+    /// The stage itself failed, with a message from the implementation.
     Processing(String),
+    /// The pipeline shut down before this item could be processed.
     ChannelClosed,
 }
 

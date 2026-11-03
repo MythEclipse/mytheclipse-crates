@@ -90,6 +90,9 @@ pub struct Job {
 }
 
 impl Job {
+    /// Builds a job on its first attempt.
+    ///
+    /// `delivered_at` stays `None` until a worker takes it.
     pub fn new(id: JobId, topic: &str, payload: Vec<u8>) -> Self {
         // One clock read for both timestamps: they describe the same instant,
         // and `SystemTime::now()` is not free.

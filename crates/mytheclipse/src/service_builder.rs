@@ -22,10 +22,15 @@ use crate::retry::{retry, RetryConfig, RetryError};
 /// Error returned by [`ServiceBuilder::run`].
 #[derive(Debug)]
 pub enum RunError<E> {
+    /// The call failed and no retry was configured.
     Inner(E),
+    /// The call failed on every attempt.
     Retry(RetryError<E>),
+    /// The circuit breaker refused the call without running it.
     CircuitOpen,
+    /// The deadline elapsed.
     Timeout,
+    /// The rate limiter had no tokens left.
     RateLimited,
 }
 
@@ -54,10 +59,14 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for RunError<E> {
 /// makes them enforceable.
 #[derive(Clone)]
 pub struct ServiceConfig {
+    /// Attempts per call. `0` disables retrying.
     pub max_attempts: u32,
+    /// Deadline for one attempt. [`Duration::ZERO`] disables the deadline.
     pub timeout: Duration,
+    /// Sustained request rate. `0.0` disables rate limiting.
     #[cfg(feature = "traffic")]
     pub rate_per_sec: f64,
+    /// Burst allowance for the limiter. `0` disables rate limiting.
     #[cfg(feature = "traffic")]
     pub rate_burst: u64,
 }
@@ -77,6 +86,27 @@ impl Default for ServiceConfig {
 
 // Builder -----------------------------------------------------------------
 
+/// Wraps a call in retry, circuit breaking, rate limiting and a deadline,
+/// configured once instead of hand-composed per call site.
+///
+/// ```
+/// use std::time::Duration;
+/// use mytheclipse::prelude::*;
+///
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let svc = ServiceBuilder::new(ServiceConfig {
+///     max_attempts: 3,
+///     timeout: Duration::from_secs(5),
+///     ..Default::default()
+/// });
+///
+/// let value = svc
+///     .run(|| Box::pin(async { Ok::<u32, std::io::Error>(1) }))
+///     .await?;
+/// assert_eq!(value, 1);
+/// # Ok(())
+/// # }
+/// ```
 pub struct ServiceBuilder {
     #[cfg(feature = "resiliency")]
     retry_cfg: Option<RetryConfig>,
@@ -88,6 +118,11 @@ pub struct ServiceBuilder {
 }
 
 impl ServiceBuilder {
+    /// Builds a service from `config`.
+    ///
+    /// Retrying is on when `max_attempts > 0`, rate limiting when both
+    /// `rate_per_sec` and `rate_burst` are set. Circuit breaking has no config
+    /// field: pass one to [`with_circuit_breaker`](Self::with_circuit_breaker).
     pub fn new(config: ServiceConfig) -> Self {
         #[cfg(feature = "resiliency")]
         let retry_cfg = (config.max_attempts > 0).then(|| RetryConfig {
@@ -116,12 +151,14 @@ impl ServiceBuilder {
     }
 
     #[cfg(feature = "resiliency")]
+    /// Routes every call through `cb`, so an open breaker short-circuits it.
     pub fn with_circuit_breaker(mut self, cb: CircuitBreaker) -> Self {
         self.circuit = Some(cb);
         self
     }
 
     #[cfg(feature = "traffic")]
+    /// Replaces the limiter built from [`ServiceConfig`] with `rl`.
     pub fn with_rate_limiter(mut self, rl: RateLimiter) -> Self {
         self.rate_limiter = Some(rl);
         self
@@ -154,6 +191,10 @@ impl ServiceBuilder {
         }
     }
 
+    /// Runs `f` through every configured layer.
+    ///
+    /// `f` is called once per attempt, so it must be able to run again: build
+    /// the request inside the closure rather than capturing one built request.
     pub async fn run<F, T, E>(&self, f: F) -> Result<T, RunError<E>>
     where
         F: FnMut() -> Pin<Box<dyn Future<Output = Result<T, E>> + Send>>,

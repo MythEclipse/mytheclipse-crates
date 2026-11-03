@@ -16,6 +16,7 @@ pub type JobFuture = Pin<Box<dyn std::future::Future<Output = Result<(), JobErro
 
 /// A handler for processing a single job.
 pub trait JobHandler: Send + Sync {
+    /// Handles one job, returning a future the pool awaits before acking.
     fn handle(&self, job: Job) -> JobFuture;
 }
 

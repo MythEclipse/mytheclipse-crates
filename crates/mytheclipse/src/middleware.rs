@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 /// Error returned by [`MiddlewarePipeline::apply`].
 #[derive(Debug)]
 pub struct PipelineError {
+    /// What the failing layer reported.
     pub msg: String,
 }
 
@@ -44,6 +45,7 @@ pub struct MiddlewarePipeline<S> {
 }
 
 impl<S: Send + 'static> MiddlewarePipeline<S> {
+    /// Creates a pipeline with no layers.
     pub fn new() -> Self {
         Self {
             layers: Arc::new(Mutex::new(Vec::new())),

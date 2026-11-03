@@ -17,6 +17,10 @@ use crate::traits::Queue;
 
 /// A handler that processes a batch of jobs atomically.
 pub trait BatchJobHandler: Send + Sync {
+    /// Processes `jobs` as one unit.
+    ///
+    /// Returning `Err` leaves the whole batch unacked, so the pool retries it
+    /// under the usual attempt budget.
     fn handle_batch(
         &self,
         jobs: Vec<Job>,
@@ -71,6 +75,7 @@ pub struct BatchProcessor<Q: Queue + 'static> {
 }
 
 impl<Q: Queue + 'static> BatchProcessor<Q> {
+    /// Creates a processor; nothing is read until [`start`](Self::start).
     pub fn new(queue: Q, config: BatchConfig) -> Self {
         let sem = Arc::new(Semaphore::new(config.concurrency.max(1)));
         Self {

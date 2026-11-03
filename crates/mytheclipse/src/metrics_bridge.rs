@@ -22,6 +22,7 @@ pub struct CircuitBreakerHealthCheck {
 
 #[cfg(feature = "resiliency")]
 impl CircuitBreakerHealthCheck {
+    /// Wraps `breaker` so its state shows up in `/health`.
     pub fn new(breaker: crate::circuit_breaker::CircuitBreaker) -> Self {
         Self { breaker }
     }
@@ -55,6 +56,7 @@ pub struct MetricsHealthCheck {
 }
 
 impl MetricsHealthCheck {
+    /// Reads its verdict from `collector`.
     pub fn new(collector: MetricsCollector) -> Self {
         Self { collector }
     }
@@ -95,6 +97,7 @@ pub struct MetricsBridge {
 }
 
 impl MetricsBridge {
+    /// Reads snapshots from `collector`.
     pub fn new(collector: MetricsCollector) -> Self {
         Self { collector }
     }

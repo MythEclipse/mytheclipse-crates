@@ -16,18 +16,27 @@ use crate::simple_rng::{random_rng, Rng};
 /// How much random jitter to apply to each backoff delay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JitterKind {
+    /// No randomness: the delay is exactly `base_delay * factor^n`.
     None,
+    /// Half fixed, half random: the delay lands in `[d/2, d]`.
     Equal,
+    /// Fully random: the delay lands in `[0, d]`, which spreads a thundering
+    /// herd the hardest.
     Full,
 }
 
 /// Configuration driving [`retry`].
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
+    /// Total attempts, including the first. `3` means two retries.
     pub max_attempts: u32,
+    /// Delay before the second attempt.
     pub base_delay: Duration,
+    /// Ceiling the exponential growth saturates at.
     pub max_delay: Duration,
+    /// Multiplier per attempt: attempt `n` waits `base_delay * factor^n`.
     pub factor: f64,
+    /// How much randomness to add to each delay.
     pub jitter: JitterKind,
 }
 
@@ -46,10 +55,17 @@ impl Default for RetryConfig {
 /// The error returned by [`retry`] once it gives up.
 #[derive(Debug)]
 pub enum RetryError<E> {
-    Exhausted { attempts: u32, last: E },
+    /// Every attempt failed.
+    Exhausted {
+        /// Attempts made, including the first.
+        attempts: u32,
+        /// Error from the final attempt.
+        last: E,
+    },
 }
 
 impl<E> RetryError<E> {
+    /// The error from the final attempt.
     pub fn last(&self) -> &E {
         match self {
             Self::Exhausted { last, .. } => last,
@@ -72,11 +88,19 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for RetryError<E>
 /// Statistics collected during a [`retry`] call.
 #[derive(Debug, Clone, Default)]
 pub struct RetryStats {
+    /// Attempts made, including the first.
     pub attempts: u32,
+    /// Attempts that followed a failure.
     pub retries: u32,
+    /// Rendered error from the final attempt, when any attempt failed.
     pub last_error: Option<String>,
 }
 
+/// Runs `op` until it succeeds or `config.max_attempts` is spent, returning
+/// the statistics alongside the outcome.
+///
+/// Same loop as [`retry`], but the caller also gets [`RetryStats`] — useful
+/// when retries are a metric rather than a detail.
 pub async fn retry_with_stats<T, E, F, Fut, P>(
     config: RetryConfig,
     filter: P,
@@ -134,6 +158,42 @@ where
     }
 }
 
+/// Runs `op` until it succeeds, `filter` rejects the error, or
+/// `config.max_attempts` is spent.
+///
+/// `filter` decides whether a given error is worth retrying: return `true` to
+/// try again, `false` to give up immediately with
+/// [`RetryError::Exhausted`] carrying that first error.
+///
+/// ```
+/// use std::time::Duration;
+/// use mytheclipse::prelude::*;
+///
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut attempt = 0;
+/// let value = retry(
+///     RetryConfig {
+///         max_attempts: 3,
+///         base_delay: Duration::from_millis(1),
+///         ..Default::default()
+///     },
+///     |e: &std::io::Error| e.kind() == std::io::ErrorKind::TimedOut,
+///     || {
+///         attempt += 1;
+///         async move {
+///             if attempt < 3 {
+///                 Err(std::io::Error::from(std::io::ErrorKind::TimedOut))
+///             } else {
+///                 Ok(7)
+///             }
+///         }
+///     },
+/// )
+/// .await?;
+/// assert_eq!(value, 7);
+/// # Ok(())
+/// # }
+/// ```
 pub async fn retry<T, E, F, Fut, P>(
     config: RetryConfig,
     filter: P,

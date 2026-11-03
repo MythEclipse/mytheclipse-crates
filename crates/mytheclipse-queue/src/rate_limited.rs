@@ -18,7 +18,9 @@ use async_trait::async_trait;
 /// Error returned by [`RateLimitedQueue::enqueue`].
 #[derive(Debug)]
 pub enum RateLimitQueueError {
+    /// The limiter refused the job; nothing was enqueued.
     RateLimited,
+    /// The wrapped queue rejected the job.
     Other(QueueError),
 }
 

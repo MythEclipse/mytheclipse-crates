@@ -27,6 +27,8 @@ pub struct AsyncLifecycleManager {
 }
 
 impl AsyncLifecycleManager {
+    /// Creates a manager with a fresh shutdown channel and an empty health
+    /// registry.
     pub fn new() -> Self {
         Self {
             shutdown: ShutdownManager::new(),

@@ -45,6 +45,10 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for PoolError {
 
 /// A pooled resource that releases the permit when dropped.
 pub struct Pooled<T> {
+    /// The checked-out resource.
+    ///
+    /// Dropping the `Pooled` returns the permit; the value itself is a clone,
+    /// so there is nothing to hand back.
     pub resource: T,
     _permit: OwnedSemaphorePermit,
 }
