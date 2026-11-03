@@ -7,6 +7,7 @@
 //! can forward (e.g. to OpenTelemetry).
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -188,66 +189,82 @@ impl MetricsCollector {
     /// The output is suitable to serve with
     /// `Content-Type: text/plain; version=0.0.4`.
     pub fn export_prometheus(&self) -> String {
-        let mut out = String::new();
         let snap = self.snapshot();
+
+        let mut counters: Vec<_> = snap.counters.into_iter().collect();
+        counters.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut gauges: Vec<_> = snap.gauges.into_iter().collect();
+        gauges.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut histos: Vec<_> = snap.histograms.into_iter().collect();
+        histos.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Every line is written straight into the output buffer: formatting into
+        // a temporary `String` first would allocate once per line, which is most
+        // of what a scrape used to cost.
+        let mut out = String::with_capacity(
+            BASE_EXPORT_BYTES
+                + (counters.len() + gauges.len()) * SERIES_EXPORT_BYTES
+                + histos.len() * HISTOGRAM_EXPORT_BYTES,
+        );
 
         out.push_str("# HELP mytheclipse_active_threads Number of active worker threads.\n");
         out.push_str("# TYPE mytheclipse_active_threads gauge\n");
-        out.push_str(&format!(
-            "mytheclipse_active_threads {}\n",
-            snap.active_threads
-        ));
+        let _ = writeln!(out, "mytheclipse_active_threads {}", snap.active_threads);
         out.push_str("# HELP mytheclipse_queue_capacity_total Total queue capacity.\n");
         out.push_str("# TYPE mytheclipse_queue_capacity_total gauge\n");
-        out.push_str(&format!(
-            "mytheclipse_queue_capacity_total {}\n",
+        let _ = writeln!(
+            out,
+            "mytheclipse_queue_capacity_total {}",
             snap.queue_capacity_total
-        ));
+        );
         out.push_str("# HELP mytheclipse_queue_capacity_remaining Remaining queue capacity.\n");
         out.push_str("# TYPE mytheclipse_queue_capacity_remaining gauge\n");
-        out.push_str(&format!(
-            "mytheclipse_queue_capacity_remaining {}\n",
+        let _ = writeln!(
+            out,
+            "mytheclipse_queue_capacity_remaining {}",
             snap.queue_capacity_remaining
-        ));
+        );
         out.push_str("# HELP mytheclipse_task_count Total tasks recorded.\n");
         out.push_str("# TYPE mytheclipse_task_count counter\n");
-        out.push_str(&format!("mytheclipse_task_count {}\n", snap.task_count));
+        let _ = writeln!(out, "mytheclipse_task_count {}", snap.task_count);
         if let Some(avg) = snap.avg_task_duration_micros {
             out.push_str(
                 "# HELP mytheclipse_task_duration_avg Average task duration in microseconds.\n",
             );
             out.push_str("# TYPE mytheclipse_task_duration_avg gauge\n");
-            out.push_str(&format!("mytheclipse_task_duration_avg {avg}\n"));
+            let _ = writeln!(out, "mytheclipse_task_duration_avg {avg}");
         }
 
-        let mut counters: Vec<_> = snap.counters.into_iter().collect();
-        counters.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, value) in counters {
-            out.push_str(&format!("# TYPE {name} counter\n"));
-            out.push_str(&format!("{name} {value}\n"));
+            let _ = writeln!(out, "# TYPE {name} counter");
+            let _ = writeln!(out, "{name} {value}");
         }
 
-        let mut gauges: Vec<_> = snap.gauges.into_iter().collect();
-        gauges.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, value) in gauges {
-            out.push_str(&format!("# TYPE {name} gauge\n"));
-            out.push_str(&format!("{name} {value}\n"));
+            let _ = writeln!(out, "# TYPE {name} gauge");
+            let _ = writeln!(out, "{name} {value}");
         }
 
-        let mut histos: Vec<_> = snap.histograms.into_iter().collect();
-        histos.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, h) in histos {
             if let Some(avg) = h.avg_micros {
-                out.push_str(&format!("# TYPE {name}_count counter\n"));
-                out.push_str(&format!("{name}_count {}\n", h.count));
-                out.push_str(&format!("# TYPE {name}_avg gauge\n"));
-                out.push_str(&format!("{name}_avg {avg}\n"));
+                let _ = writeln!(out, "# TYPE {name}_count counter");
+                let _ = writeln!(out, "{name}_count {}", h.count);
+                let _ = writeln!(out, "# TYPE {name}_avg gauge");
+                let _ = writeln!(out, "{name}_avg {avg}");
             }
         }
 
         out
     }
 }
+
+/// Rough size of the fixed part of a Prometheus scrape, used to size the
+/// output buffer up front.
+const BASE_EXPORT_BYTES: usize = 512;
+/// Rough size of one counter or gauge (a `# TYPE` line plus a sample line).
+const SERIES_EXPORT_BYTES: usize = 64;
+/// Rough size of one histogram (four lines).
+const HISTOGRAM_EXPORT_BYTES: usize = 128;
 
 /// A structured, serializable view of a [`MetricsCollector`], suitable for
 /// forwarding to OpenTelemetry or another backend.
