@@ -1,3 +1,20 @@
+# [4.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v3.0.0...v4.0.0) (2026-11-03)
+
+
+### Bug Fixes
+
+* **compute:** hand compute chunks to a persistent worker pool ([a2c52cf](https://github.com/MythEclipse/mytheclipse-crates/commit/a2c52cf7eb4e9ab69d92a8d035af5f94bcc8383b))
+* **metrics:** format the prometheus export into one buffer ([9d38116](https://github.com/MythEclipse/mytheclipse-crates/commit/9d381164f448bb0b611398a4e752c04796e0be19))
+* **queue:** build job ids without the format machinery ([9963198](https://github.com/MythEclipse/mytheclipse-crates/commit/99631980f78f29afc1af1473f4abddaf9c1b2012))
+* **traffic:** skip the condvar signal when nothing is waiting ([92e919f](https://github.com/MythEclipse/mytheclipse-crates/commit/92e919fb8b041596c7b87abfec79348a239c4fcf))
+
+
+### BREAKING CHANGES
+
+* **compute:** compute_map, compute_par_for_each and compute_join now require
+their closures, item types and results to be 'static, because the work is handed
+to long-lived threads. Closures that borrow from the caller no longer compile.
+
 # [3.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v2.0.0...v3.0.0) (2026-11-03)
 
 
