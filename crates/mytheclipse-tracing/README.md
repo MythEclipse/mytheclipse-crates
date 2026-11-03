@@ -1,18 +1,14 @@
 # mytheclipse-tracing
 
-Pre-built tracing infrastructure for mytheclipse applications, wrapping
-[`tracing-subscriber`] with sensible defaults and optional OTLP/Jaeger/Zipkin
-export.
+A pre-built `tracing` subscriber with environment filtering for mytheclipse
+applications: one call installs a `tracing-subscriber` fmt subscriber driven by
+`RUST_LOG`.
 
 ## Features
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `env` | yes | Real: `TracingLayer` — `tracing-subscriber` fmt subscriber with `EnvFilter`. |
-| `otel` | no | Stub: `OtelLayer` stores an OTLP endpoint string; no exporter is wired. |
-| `jaeger` | no | Placeholder: exposes the same `OtelLayer`; nothing Jaeger-specific. |
-| `zipkin` | no | Placeholder: pulls `tracing-subscriber` only, no exporter code. |
-| `full` | — | Enables `otel` + `jaeger`. |
+| `env` | yes | `TracingLayer` — `tracing-subscriber` fmt subscriber with `EnvFilter`. |
 
 ## Usage
 
@@ -20,8 +16,6 @@ export.
 [dependencies]
 mytheclipse-tracing = "1"
 ```
-
-### Basic subscriber
 
 ```rust
 use mytheclipse_tracing::TracingLayer;
@@ -32,21 +26,13 @@ fn main() {
 }
 ```
 
-### With OTLP export
+`TracingLayer::install()` sets the global default subscriber, so call it once,
+before the first span is created. `RUST_LOG` selects the filter, e.g.
+`RUST_LOG=mycrate=debug,info`.
 
-> `otel` currently provides the `OtelLayer` type and endpoint builder only; no
-> OTLP exporter is wired up yet.
+## Scope
 
-```toml
-[dependencies]
-mytheclipse-tracing = { version = "1", features = ["otel"] }
-```
-
-```rust
-use mytheclipse_tracing::OtelLayer;
-
-fn main() {
-    let layer = OtelLayer::new("http://localhost:4317");
-    println!("configured OTLP endpoint: {}", layer.endpoint());
-}
-```
+This crate installs a subscriber; it does not export spans anywhere. If you need
+OTLP/Jaeger/Zipkin, wire `tracing-opentelemetry` (or the equivalent exporter)
+yourself and register the layers — an earlier `otel`/`jaeger`/`zipkin` feature
+here only carried unused dependencies, so they were removed.

@@ -8,30 +8,19 @@ repository = "https://github.com/asepharyana/mytheclipse"
 homepage = "https://github.com/asepharyana/mytheclipse"
 documentation = "https://docs.rs/mytheclipse-tracing"
 authors = ["asepharyana <superaseph@gmail.com>"]
-description = "Pre-built tracing layers for mytheclipse applications with OTLP/Jaeger/Zipkin export support."
+description = "Pre-built tracing subscriber for mytheclipse applications with environment filtering."
 readme = "README.md"
-keywords = ["tracing", "opentelemetry", "jaeger", "zipkin", "telemetry"]
+keywords = ["tracing", "subscriber", "telemetry", "logging"]
 categories = ["development-tools::debugging", "development-tools::profiling"]
 
 [features]
 default = ["env"]
-# Standard formatting subscriber with optional coloring.
+# Standard formatting subscriber with EnvFilter support.
 env = ["dep:tracing-subscriber"]
-# OpenTelemetry OTLP exporter.
-otel = ["dep:tracing-subscriber", "dep:opentelemetry", "dep:tracing-opentelemetry"]
-# Jaeger thrift over UDP exporter.
-jaeger = ["dep:tracing-subscriber", "dep:tracing-flame"]
-# Zipkin exporter.
-zipkin = ["dep:tracing-subscriber"]
-# Full stack: otel + jaeger.
-full = ["otel", "jaeger"]
 
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"], optional = true }
-opentelemetry = { version = "0.25", default-features = false, optional = true }
-tracing-opentelemetry = { version = "0.28", optional = true }
-tracing-flame = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
