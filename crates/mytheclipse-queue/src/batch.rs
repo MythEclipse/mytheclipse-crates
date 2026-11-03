@@ -165,15 +165,19 @@ impl<Q: Queue + 'static> BatchProcessor<Q> {
     }
 
     async fn flush(handler: &Arc<dyn BatchJobHandler>, sem: &Arc<Semaphore>, batch: Vec<Job>) {
-        let permit = sem.clone().acquire_owned().await;
-        if permit.is_err() {
-            tracing::error!("batch semaphore closed");
-            return;
-        }
-        let _permit = permit.unwrap();
+        let permit = match sem.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::error!("batch semaphore closed");
+                return;
+            }
+        };
         let h = Arc::clone(handler);
         let batch_len = batch.len();
         tokio::spawn(async move {
+            // Hold the permit for the duration of the batch: dropping it here
+            // (as a `flush`-local) would make `concurrency` a no-op.
+            let _permit = permit;
             match h.handle_batch(batch).await {
                 Ok(()) => tracing::debug!(count = batch_len, "batch processed"),
                 Err(e) => tracing::error!("batch handler error: {}", e),

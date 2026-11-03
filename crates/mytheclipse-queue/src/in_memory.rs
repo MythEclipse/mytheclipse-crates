@@ -116,9 +116,17 @@ impl Queue for InMemoryQueue {
 
     async fn nack(&self, job: &Job, requeue: bool) -> Result<(), JobError> {
         if requeue {
-            self.enqueue(&job.topic, job.payload.clone())
-                .await
-                .map_err(|_| JobError::AckFailed("requeue failed".into()))?;
+            let tq = self.get_topic(&job.topic).await;
+            // Requeue the *same* job (same id) with its attempt count advanced:
+            // a fresh `Job::new` would reset the counter and make the worker's
+            // retry budget unenforceable (endless redelivery, never a DLQ).
+            let retried = Job {
+                attempt: job.attempt + 1,
+                delivered_at: Some(std::time::SystemTime::now()),
+                ..job.clone()
+            };
+            tq.jobs.lock().await.push(retried);
+            tq.notify.notify_one();
         }
         Ok(())
     }
@@ -168,5 +176,26 @@ mod tests {
         q.enqueue("t", vec![1]).await.unwrap();
         q.enqueue("t", vec![2]).await.unwrap();
         assert_eq!(q.len("t").await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn requeue_advances_attempt_on_the_same_job() {
+        let q = InMemoryQueue::new();
+        q.enqueue("t", vec![1]).await.unwrap();
+        let job = q
+            .dequeue("t", Duration::from_millis(50))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(job.attempt, 0);
+
+        q.nack(&job, true).await.unwrap();
+        let again = q
+            .dequeue("t", Duration::from_millis(50))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.id, job.id, "retry must keep the job identity");
+        assert_eq!(again.attempt, 1, "retry must advance the attempt counter");
     }
 }

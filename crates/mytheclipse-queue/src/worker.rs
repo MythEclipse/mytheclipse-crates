@@ -110,9 +110,15 @@ impl<Q: Queue + 'static> WorkerPool<Q> {
 
             tokio::spawn(async move {
                 loop {
+                    // Take a concurrency slot *before* pulling work, then hand
+                    // it to the job task: the permit must live as long as the
+                    // handler runs, otherwise the cap never binds.
+                    let permit = match sem.clone().acquire_owned().await {
+                        Ok(permit) => permit,
+                        Err(_) => break, // pool shutting down
+                    };
                     match q.dequeue(&topic_inner, cfg.poll_interval).await {
                         Ok(Some(job)) => {
-                            let _permit = sem.clone().acquire_owned().await;
                             let q2 = Arc::clone(&q);
                             let h2 = Arc::clone(&h);
                             let cfg2 = cfg.clone();
@@ -120,13 +126,24 @@ impl<Q: Queue + 'static> WorkerPool<Q> {
                             let j2 = job.clone();
 
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 let fut = h2.handle(j2.clone());
                                 match fut.await {
                                     Ok(()) => {
                                         let _ = q2.ack(&j2).await;
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         if j2.attempt < cfg2.max_retries {
+                                            let delay = retry_delay(&cfg2, j2.attempt);
+                                            tracing::warn!(
+                                                job = %j2.id,
+                                                attempt = j2.attempt + 1,
+                                                max_retries = cfg2.max_retries,
+                                                delay_ms = delay.as_millis() as u64,
+                                                error = %e,
+                                                "job failed; retrying after backoff"
+                                            );
+                                            tokio::time::sleep(delay).await;
                                             let _ = q2.nack(&j2, true).await;
                                         } else {
                                             let _ = q2.dlq_move(&t2, j2.clone()).await;
@@ -166,5 +183,38 @@ mod tests {
         let config = WorkerConfig::default();
         let d = retry_delay(&config, 0);
         assert!(d <= config.retry_max_delay);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn worker_respects_configured_concurrency() {
+        use crate::in_memory::InMemoryQueue;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let queue = InMemoryQueue::new();
+        for i in 0..6u8 {
+            queue.enqueue("t", vec![i]).await.unwrap();
+        }
+
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let pool = WorkerPool::new(queue, 2);
+
+        let (live, high) = (Arc::clone(&in_flight), Arc::clone(&peak));
+        pool.start("t", move |_job: Job| {
+            let live = Arc::clone(&live);
+            let high = Arc::clone(&high);
+            async move {
+                let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                high.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                live.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let peak = peak.load(Ordering::SeqCst);
+        assert!(peak <= 2, "handlers ran {peak} at a time, cap was 2");
+        assert_eq!(in_flight.load(Ordering::SeqCst), 0);
     }
 }
