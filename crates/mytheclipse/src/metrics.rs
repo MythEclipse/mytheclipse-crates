@@ -74,30 +74,46 @@ impl MetricsCollector {
 
     /// Increments a counter by `by`.
     pub fn inc_counter(&self, name: &str, by: u64) {
-        *self
-            .inner
-            .counters
-            .lock()
-            .unwrap()
-            .entry(name.to_string())
-            .or_insert(0) += by;
+        let mut counters = self.inner.counters.lock().unwrap();
+        // Look up first so the steady-state path does not allocate a new key.
+        match counters.get_mut(name) {
+            Some(value) => *value += by,
+            None => {
+                counters.insert(name.to_owned(), by);
+            }
+        }
     }
 
     /// Sets a gauge to `value`.
     pub fn set_gauge(&self, name: &str, value: f64) {
-        self.inner
-            .gauges
-            .lock()
-            .unwrap()
-            .insert(name.to_string(), value);
+        let mut gauges = self.inner.gauges.lock().unwrap();
+        match gauges.get_mut(name) {
+            Some(slot) => *slot = value,
+            None => {
+                gauges.insert(name.to_owned(), value);
+            }
+        }
     }
 
     /// Records `duration` into the histogram named `name`.
     pub fn observe(&self, name: &str, duration: Duration) {
+        let micros = duration.as_micros();
         let mut histos = self.inner.histograms.lock().unwrap();
-        let h = histos.entry(name.to_string()).or_default();
-        h.count += 1;
-        h.total_micros += duration.as_micros();
+        match histos.get_mut(name) {
+            Some(h) => {
+                h.count += 1;
+                h.total_micros += micros;
+            }
+            None => {
+                histos.insert(
+                    name.to_owned(),
+                    Histogram {
+                        count: 1,
+                        total_micros: micros,
+                    },
+                );
+            }
+        }
     }
 
     /// Total number of recorded tasks.
