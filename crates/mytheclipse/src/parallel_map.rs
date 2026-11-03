@@ -8,8 +8,9 @@
 //!
 //! Both spawn exactly `concurrency` worker tasks that pull items from a shared
 //! iterator instead of one task per item: the bound then limits *task
-//! creation* as well as running work, and the per-item cost is a mutex
-//! hand-off rather than a `tokio::spawn`.
+//! creation* as well as running work, and the per-item cost is a claim from a
+//! shared iterator (amortized over a small batch) rather than a
+//! `tokio::spawn`.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -51,6 +52,20 @@ impl ParallelConcurrency for () {
             .unwrap_or(1)
     }
 }
+
+/// How many items one worker claims per lock acquisition.
+///
+/// One item per lock makes the shared mutex the bottleneck: with N workers
+/// hammering it, every item pays a cache-line transfer. Claiming a small batch
+/// amortizes that, while staying small enough that a worker never sits on more
+/// than a few percent of the input (which would starve the others of work when
+/// item costs are uneven).
+fn handoff_batch(len: usize, workers: usize) -> usize {
+    (len / (workers * 16)).clamp(1, 8)
+}
+
+/// Claim size for [`parallel_for_each`], whose stream length is unknown.
+const STREAM_BATCH: usize = 8;
 
 /// Runs `f` over every element of `items`, with at most `concurrency`
 /// futures in flight, and returns the results **in input order**.
@@ -103,20 +118,28 @@ where
     // tagged with its index, so ordering needs no shared output buffer.
     let queue = Arc::new(Mutex::new(items.into_iter().enumerate()));
     let f = Arc::new(f);
+    let batch = handoff_batch(len, workers);
 
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
         let queue = Arc::clone(&queue);
         let f = Arc::clone(&f);
         handles.push(tokio::spawn(async move {
-            let mut done: Vec<(usize, Result<T, E>)> = Vec::new();
+            // One slot per item this worker is expected to handle, so the
+            // result vector does not reallocate on the way to `len / workers`.
+            let mut done: Vec<(usize, Result<T, E>)> = Vec::with_capacity(len / workers + batch);
+            let mut claimed: Vec<(usize, I::Item)> = Vec::with_capacity(batch);
             loop {
-                let next = {
+                {
                     let mut q = queue.lock().expect("item queue poisoned");
-                    q.next()
-                };
-                let Some((index, item)) = next else { break };
-                done.push((index, f(item).await));
+                    claimed.extend(q.by_ref().take(batch));
+                }
+                if claimed.is_empty() {
+                    break;
+                }
+                for (index, item) in claimed.drain(..) {
+                    done.push((index, f(item).await));
+                }
             }
             done
         }));
@@ -221,6 +244,9 @@ where
     let workers = concurrency.resolve();
     let queue = Arc::new(Mutex::new(items.into_iter()));
     let f = Arc::new(f);
+    // The stream length is unknown, so the claim size is fixed: big enough to
+    // amortize the hand-off lock, small enough to keep read-ahead bounded.
+    let batch = STREAM_BATCH;
 
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
@@ -228,14 +254,19 @@ where
         let f = Arc::clone(&f);
         handles.push(tokio::spawn(async move {
             let mut errors: Vec<Box<dyn std::error::Error + Send + Sync>> = Vec::new();
+            let mut claimed: Vec<I::Item> = Vec::with_capacity(batch);
             loop {
-                let next = {
+                {
                     let mut q = queue.lock().expect("item queue poisoned");
-                    q.next()
-                };
-                let Some(item) = next else { break };
-                if let Err(e) = f(item).await {
-                    errors.push(Box::new(e));
+                    claimed.extend(q.by_ref().take(batch));
+                }
+                if claimed.is_empty() {
+                    break;
+                }
+                for item in claimed.drain(..) {
+                    if let Err(e) = f(item).await {
+                        errors.push(Box::new(e));
+                    }
                 }
             }
             errors
