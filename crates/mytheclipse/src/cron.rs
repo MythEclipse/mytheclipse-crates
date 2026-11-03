@@ -118,24 +118,30 @@ impl CronSchedule {
     /// Returns the next fire time strictly after `from`, or `None` if the
     /// expression cannot fire within the scan horizon (e.g. Feb 30).
     ///
-    /// Walks whole minutes, skipping to the next day whenever the current date
-    /// can never match (so a yearly schedule costs days, not 500k minutes).
-    /// The horizon is still ~five years of minutes.
+    /// Jumps to the next month when the month is excluded, to the next day when
+    /// only the day is, and to the next hour when only the hour is, so cost
+    /// scales with the calendar distance to the match rather than with minutes.
     pub fn next_after(&self, from: CronTime) -> Option<CronTime> {
         let horizon = 5 * 366 * 24 * 60; // minutes in ~5 years
         let mut spent = 0u32;
         // Scan whole minutes (second = 0), starting strictly after `from`.
         let mut act = from.advance_minute();
         while spent < horizon {
-            if self.matches(act) {
+            if !self.date_matches(act) {
+                act = if self.months.contains(&(act.month as u8)) {
+                    act.next_day_start()
+                } else {
+                    act.next_month_start()
+                };
+                spent += 24 * 60;
+            } else if !self.hours.contains(&(act.hour as u8)) {
+                act = act.next_hour_start();
+                spent += 60;
+            } else if self.minutes.contains(&(act.minute as u8)) {
                 return Some(act);
-            }
-            if self.date_matches(act) {
+            } else {
                 act = act.advance_minute();
                 spent += 1;
-            } else {
-                act = act.next_day_start();
-                spent += 24 * 60;
             }
         }
         None
@@ -158,12 +164,6 @@ impl CronSchedule {
             (false, false) => true,
         };
         month_ok && day_ok
-    }
-
-    fn matches(&self, t: CronTime) -> bool {
-        self.date_matches(t)
-            && self.hours.contains(&(t.hour as u8))
-            && self.minutes.contains(&(t.minute as u8))
     }
 
     /// The next several fire times, for display/tests.
@@ -245,6 +245,29 @@ impl CronTime {
     fn next_day_start(self) -> Self {
         let day_start = (self.to_timestamp().div_euclid(86_400) + 1) * 86_400;
         from_timestamp(day_start)
+    }
+
+    /// The first minute of the following hour.
+    fn next_hour_start(self) -> Self {
+        let hour_start = (self.to_timestamp().div_euclid(3_600) + 1) * 3_600;
+        from_timestamp(hour_start)
+    }
+
+    /// The first minute of the following month.
+    fn next_month_start(self) -> Self {
+        let (year, month) = if self.month == 12 {
+            (self.year + 1, 1)
+        } else {
+            (self.year, self.month + 1)
+        };
+        CronTime {
+            year,
+            month,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        }
     }
 
     fn add_seconds(self, secs: i64) -> Self {
@@ -487,6 +510,29 @@ mod tests {
         let s = CronSchedule::parse("30 4 15 6 *").unwrap();
         let next = s.next_after(t(2026, 6, 15, 4, 30)).unwrap();
         assert_eq!(next, t(2027, 6, 15, 4, 30));
+    }
+
+    #[test]
+    fn month_skipping_still_lands_on_the_exact_fire_time() {
+        // March -> next January 1st: the scan must jump months, not days.
+        let s = CronSchedule::parse("0 0 1 1 *").unwrap();
+        let next = s.next_after(t(2026, 3, 7, 12, 0)).unwrap();
+        assert_eq!(next, t(2027, 1, 1, 0, 0));
+    }
+
+    #[test]
+    fn month_skipping_wraps_the_year() {
+        let s = CronSchedule::parse("0 0 1 1 *").unwrap();
+        let next = s.next_after(t(2026, 12, 31, 23, 59)).unwrap();
+        assert_eq!(next, t(2027, 1, 1, 0, 0));
+    }
+
+    #[test]
+    fn hour_skipping_still_lands_on_the_exact_fire_time() {
+        // Only 04:30 fires: the scan must jump hours, not minutes.
+        let s = CronSchedule::parse("30 4 * * *").unwrap();
+        let next = s.next_after(t(2026, 8, 28, 0, 1)).unwrap();
+        assert_eq!(next, t(2026, 8, 28, 4, 30));
     }
 
     #[test]
