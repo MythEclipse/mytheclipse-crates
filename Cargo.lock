@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-cache"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1360,7 +1360,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-event"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-queue"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-tracing"
-version = "4.0.1"
+version = "4.1.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",

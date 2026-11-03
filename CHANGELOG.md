@@ -1,3 +1,10 @@
+# [4.1.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.0.1...v4.1.0) (2026-11-03)
+
+
+### Features
+
+* **cache:** re-export typedcache from the crate root ([5509a23](https://github.com/MythEclipse/mytheclipse-crates/commit/5509a23551f18a66545224b8f8bc3a872d34e7dd))
+
 ## [4.0.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.0.0...v4.0.1) (2026-11-03)
 
 
