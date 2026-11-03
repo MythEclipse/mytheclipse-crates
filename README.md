@@ -70,7 +70,7 @@ read a change above that as real.
 | `event` publish, no subscriber / with | 50 ns / 73 ns |
 | `semaphore_pool` acquire+release | 91 ns |
 | `dlock` acquire+release (1k live keys) | 122 ns |
-| `cron` parse / next_after hourly / yearly | 282 ns / 1.0 µs / 2.0 µs |
+| `cron` parse / next_after hourly / yearly | 300 ns / 60 ns / 50 ns |
 | `metrics` export_prometheus (64 series) | 7.3 µs |
 | `compute_join` | 5.0 µs |
 | `parallel_map` 8 items @ 8 | 5.5 µs |
@@ -85,6 +85,13 @@ from a shared iterator rather than one task per item, and each worker claims a
 small batch of items per lock acquisition: the bound then caps task creation
 *and* futures in flight, while the hand-off lock is amortized instead of paid
 per item.
+
+`CronSchedule::next_after` binary-searches each field's sorted allowed set
+instead of stepping through minutes: it lands directly on the next matching
+month, day, hour or minute, so the cost tracks the number of calendar fields
+that have to be skipped rather than the distance to the answer. That is why the
+yearly case (Feb 29) is now *faster* than the hourly one — it skips three fields
+and lands, where the hourly one walks a minute set.
 
 The `compute` primitives hand their chunks to a process-wide pool of worker
 threads that starts on first use. That pool is the whole point: a thread costs
