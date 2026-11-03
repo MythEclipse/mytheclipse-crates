@@ -13,7 +13,8 @@ filtered by `RUST_LOG`, written to **stderr**.
 
 ```toml
 [dependencies]
-mytheclipse-tracing = "1"
+mytheclipse-tracing = "4"
+tracing = "0.1"   # the macros are `tracing`'s, not this crate's
 ```
 
 ```rust

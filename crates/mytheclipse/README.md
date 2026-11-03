@@ -33,6 +33,10 @@ dependencies your application actually uses.
 - **`io`** — `spawn_io`, instrumented async task spawning.
 - **`compute`** — `compute`, `compute_join`, `compute_map`,
   `compute_par_for_each`: panic-isolated execution on a sized worker pool.
+  The pool is process-wide and starts on first use, so a call pays a hand-off
+  rather than a thread creation. Because the work goes to long-lived threads,
+  closures, item types and results must be `'static`; a call made from inside a
+  pool worker runs inline instead of submitting, so nesting cannot deadlock.
 - **`bg`** — `spawn_bg`, semaphore-bounded background tasks.
 - **`resiliency`** — fault tolerance:
   - `retry` / `retry_ext` — exponential backoff with full/equal jitter, plus a
@@ -40,7 +44,9 @@ dependencies your application actually uses.
   - `circuit_breaker` — Closed/Open/HalfOpen state machine with bounded probe
     admission.
   - `timeout` — `with_timeout`, `timeout`, `Timeout`.
-  - `parallel_map` / `parallel_for_each` — bounded fan-out over a collection.
+  - `parallel_map` / `parallel_map_unordered` / `parallel_for_each` — bounded
+    fan-out over a collection. Pass a `usize` for an explicit worker count, or
+    `()` to size it from the host's CPU count.
   - `aggregate_error` — collect every failure instead of only the first.
   - `service_builder` — assemble a runnable service from these primitives.
 - **`traffic`** — traffic and load control:
@@ -73,7 +79,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mytheclipse = { version = "1", features = ["full"] }
+mytheclipse = { version = "4", features = ["full"] }
 ```
 
 ### 1. Execution Primitives
@@ -96,6 +102,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = (io.await, bg.await);
     Ok(())
 }
+```
+
+Bounded fan-out, for when you have a collection rather than one task:
+
+```rust
+use mytheclipse::{parallel_for_each, parallel_map};
+
+// 4 workers, results in input order.
+let doubled = parallel_map(items, 4, |x| async move { Ok::<_, std::io::Error>(x * 2) }).await?;
+
+// `()` sizes the bound from the host CPU count; order does not matter here.
+parallel_for_each(urls, (), |url| async move { fetch(url).await }).await?;
 ```
 
 ### 2. Resiliency & Fault Tolerance

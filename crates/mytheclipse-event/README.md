@@ -8,7 +8,8 @@ service-to-service) communication isn't locked to one transport.
 - **Distributed broker backends** — RabbitMQ (`amqp`) and NATS (`nats`)
   behind the same `EventBus` trait, so swapping the backend doesn't change
   handler code.
-- **Typed convenience** — `TypedEventBus` layers JSON encoding on top.
+- **Typed convenience** (feature `typed`) — `TypedEventBus` layers JSON
+  encoding on top.
 
 ## Features
 
@@ -18,6 +19,20 @@ service-to-service) communication isn't locked to one transport.
 - `nats` — NATS via `async-nats`.
 
 ## Usage
+
+`EventBus` moves `Vec<u8>`, and that is all the default feature set compiles —
+no `serde`, no `serde_json`:
+
+```rust
+use mytheclipse_event::{EventBus, InMemoryEventBus};
+
+let bus = InMemoryEventBus::default();
+let mut sub = bus.subscribe("orders").await?;
+bus.publish("orders", b"{\"id\":42}".to_vec()).await?;
+let payload = sub.recv().await?;
+```
+
+With `features = ["typed"]` you get JSON encoding over the same trait:
 
 ```rust
 use mytheclipse_event::{InMemoryEventBus, TypedEventBus};

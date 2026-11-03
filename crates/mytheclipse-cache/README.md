@@ -7,10 +7,23 @@ provider. Combines an in-process **L1** cache with a distributed **L2** cache
 
 ## Features
 
-- `l1-memory` (default) — zero-dependency in-process cache.
+- `l1-memory` (default) — in-process cache, no external service.
 - `l2-redis` — Redis/Valkey L2 via `fred`.
 - `cache-aside` (default) — read-through cache-aside helper.
 - `typed` — `TypedCache`, JSON get/set over any `Cache` (adds `serde`).
+
+## Typed values
+
+`Cache` moves `Vec<u8>`. When you want typed get/set, enable `typed`, which
+adds `TypedCache` (JSON encoding via `serde`):
+
+```rust
+use mytheclipse_cache::{MemoryCache, TypedCache};
+
+let cache = TypedCache::new(MemoryCache::new());
+cache.set("orders:42", &Order { id: 42 }, None).await?;
+let order: Option<Order> = cache.get("orders:42").await?;
+```
 
 ## Usage
 

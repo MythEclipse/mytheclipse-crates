@@ -12,7 +12,7 @@ concern.
 | Crate | Description | Docs |
 | :--- | :--- | :--- |
 | [`mytheclipse`](crates/mytheclipse) | Resource-aware execution primitives (async I/O, compute, background queues), resiliency (retry, circuit breaker, timeout), traffic control (rate limiter, backpressure, concurrency limiter), lifecycle (graceful shutdown, cron, async lifecycle manager, distributed lock), and observability (metrics, panic tracking, metrics-to-health bridge). | [README](crates/mytheclipse/README.md) |
-| [`mytheclipse-cache`](crates/mytheclipse-cache) | Unified multi-layer (L1/L2) cache abstraction: in-memory or Moka L1, Redis/Valkey L2, cache-aside read-through. | [README](crates/mytheclipse-cache/README.md) |
+| [`mytheclipse-cache`](crates/mytheclipse-cache) | Unified multi-layer (L1/L2) cache abstraction: in-memory L1, Redis/Valkey L2, cache-aside read-through. | [README](crates/mytheclipse-cache/README.md) |
 | [`mytheclipse-event`](crates/mytheclipse-event) | Unified events & message bus abstraction: in-memory pub/sub dispatcher plus RabbitMQ and NATS broker adapters behind one trait. | [README](crates/mytheclipse-event/README.md) |
 | [`mytheclipse-queue`](crates/mytheclipse-queue) | Job queue abstraction with WorkerPool executor, retry/backoff, and dead-letter support. In-memory backend only; `Queue` is a trait for adding another transport. | [README](crates/mytheclipse-queue/README.md) |
 | [`mytheclipse-tracing`](crates/mytheclipse-tracing) | Pre-built `tracing-subscriber` fmt layer with `RUST_LOG` filtering, installed in one call. | [README](crates/mytheclipse-tracing/README.md) |
@@ -29,13 +29,17 @@ Each crate is published independently; add the ones you need:
 
 ```toml
 [dependencies]
-mytheclipse = { version = "1", features = ["full"] }
-mytheclipse-cache = "1"
-mytheclipse-event = { version = "1", features = ["nats"] }
+mytheclipse = { version = "4", features = ["full"] }
+mytheclipse-cache = "4"
+mytheclipse-event = { version = "4", features = ["nats"] }
 ```
 
 See each crate's own README (linked above) for usage examples and the full
 feature-flag list.
+
+The cache and event crates move bytes by default. Their JSON-typed views
+(`TypedCache`, `TypedEventBus`) sit behind a `typed` feature, so a crate that
+only moves `Vec<u8>` does not compile `serde` at all.
 
 ## Performance
 
