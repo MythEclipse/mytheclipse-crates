@@ -57,29 +57,40 @@ read a change above that as real.
 
 | primitive | time |
 | --- | --- |
-| `circuit_breaker` closed allow+record | 1.9 ns |
+| `circuit_breaker` closed allow+record | 1.7 ns |
 | `metrics` inc_counter / observe | 17 ns / 17 ns |
-| `shutdown_guard` new+drop | 26 ns |
-| `cache` get hit / miss | 27 ns / 22 ns |
-| `rate_limiter` try_acquire | 31 ns |
-| `backpressure` push+pop | 35 ns |
-| `queue` len / enqueue+dequeue | 40 ns / 215 ns |
-| `queue` job id | 69 ns |
-| `cache` set / set at capacity (evict) | 46 ns / 115 ns |
-| `event` publish, no subscriber / with | 51 ns / 75 ns |
-| `semaphore_pool` acquire+release | 94 ns |
-| `concurrency_limiter` try_acquire+release | 110 ns |
-| `dlock` acquire+release (1k live keys) | 125 ns |
-| `cron` parse / next_after hourly / yearly | 346 ns / 450 ns / 2.0 µs |
-| `metrics` export_prometheus (64 series) | 11 µs |
+| `queue` job id | 16 ns |
+| `shutdown_guard` new+drop | 25 ns |
+| `cache` get hit / miss | 26 ns / 20 ns |
+| `concurrency_limiter` try_acquire+release | 29 ns |
+| `rate_limiter` try_acquire | 30 ns |
+| `backpressure` push+pop | 34 ns |
+| `queue` len / enqueue+dequeue | 37 ns / 154 ns |
+| `cache` set / set at capacity (evict) | 44 ns / 112 ns |
+| `event` publish, no subscriber / with | 50 ns / 73 ns |
+| `semaphore_pool` acquire+release | 91 ns |
+| `dlock` acquire+release (1k live keys) | 122 ns |
+| `cron` parse / next_after hourly / yearly | 282 ns / 1.0 µs / 2.0 µs |
+| `metrics` export_prometheus (64 series) | 7.3 µs |
+| `compute_join` | 5.0 µs |
+| `parallel_map` 8 items @ 8 | 5.5 µs |
+| `compute_map` 8 items | 6.5 µs |
 | `parallel_for_each` 1000 items @ 8 | 12 µs |
-| `parallel_map` 1000 items @ 8 | 29 µs |
+| `compute_par_for_each` 1000 items | 21 µs |
+| `compute_map` 1000 items | 23 µs |
+| `parallel_map` 1000 items @ 8 | 26 µs |
 
 `parallel_map` and `parallel_for_each` spawn `concurrency` workers that pull
 from a shared iterator rather than one task per item, and each worker claims a
 small batch of items per lock acquisition: the bound then caps task creation
 *and* futures in flight, while the hand-off lock is amortized instead of paid
 per item.
+
+The `compute` primitives hand their chunks to a process-wide pool of worker
+threads that starts on first use. That pool is the whole point: a thread costs
+tens of microseconds to create, so spawning workers per call would cost more
+than the work itself — measured at 100 µs for an eight-item map before the pool
+existed, against 6.5 µs after.
 
 ### On `-C target-cpu=native`
 

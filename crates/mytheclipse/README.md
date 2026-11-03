@@ -17,7 +17,7 @@ Given `N` logical cores (`std::thread::available_parallelism()`):
 | Subsystem | Sizing | On 8 cores | Backing primitive |
 | :--- | :--- | :--- | :--- |
 | **Async I/O** | `N` | 8 | Ambient `tokio::spawn` + `tracing` span |
-| **Compute** | `max(1, N - 1)` | 7 | `std::thread::scope` workers + `catch_unwind` |
+| **Compute** | `max(1, N - 1)` | 7 | Process-wide worker pool + `catch_unwind` |
 | **Background Queue** | `max(2, N / 2)` | 4 | `tokio::sync::Semaphore` + `tokio::spawn` |
 
 The three execution primitives (`io`, `compute`, `bg`) are sized from the host's
@@ -32,7 +32,7 @@ dependencies your application actually uses.
 
 - **`io`** — `spawn_io`, instrumented async task spawning.
 - **`compute`** — `compute`, `compute_join`, `compute_map`,
-  `compute_par_for_each`: panic-isolated execution on a sized Rayon pool.
+  `compute_par_for_each`: panic-isolated execution on a sized worker pool.
 - **`bg`** — `spawn_bg`, semaphore-bounded background tasks.
 - **`resiliency`** — fault tolerance:
   - `retry` / `retry_ext` — exponential backoff with full/equal jitter, plus a
