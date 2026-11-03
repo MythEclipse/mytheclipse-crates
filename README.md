@@ -57,22 +57,23 @@ read a change above that as real.
 
 | primitive | time |
 | --- | --- |
-| `circuit_breaker` closed allow+record | 2.0 ns |
-| `metrics` inc_counter / observe | 19 ns / 22 ns |
-| `shutdown_guard` new+drop | 27 ns |
-| `cache` get hit / miss | 28 ns / 24 ns |
+| `circuit_breaker` closed allow+record | 1.9 ns |
+| `metrics` inc_counter / observe | 17 ns / 17 ns |
+| `shutdown_guard` new+drop | 26 ns |
+| `cache` get hit / miss | 27 ns / 22 ns |
 | `rate_limiter` try_acquire | 31 ns |
-| `backpressure` push+pop | 34 ns |
-| `queue` len / enqueue+dequeue | 40 ns / 186 ns |
-| `cache` set / set at capacity (evict) | 47 ns / 130 ns |
-| `event` publish, no subscriber / with | 59 ns / 73 ns |
-| `semaphore_pool` acquire+release | 97 ns |
-| `concurrency_limiter` try_acquire+release | 112 ns |
-| `dlock` acquire+release (1k live keys) | 137 ns |
-| `cron` next_after, hourly / yearly | 0.76 µs / 2.0 µs |
+| `backpressure` push+pop | 35 ns |
+| `queue` len / enqueue+dequeue | 40 ns / 215 ns |
+| `queue` job id | 69 ns |
+| `cache` set / set at capacity (evict) | 46 ns / 115 ns |
+| `event` publish, no subscriber / with | 51 ns / 75 ns |
+| `semaphore_pool` acquire+release | 94 ns |
+| `concurrency_limiter` try_acquire+release | 110 ns |
+| `dlock` acquire+release (1k live keys) | 125 ns |
+| `cron` parse / next_after hourly / yearly | 346 ns / 450 ns / 2.0 µs |
 | `metrics` export_prometheus (64 series) | 11 µs |
-| `parallel_for_each` 1000 items @ 8 | 21 µs |
-| `parallel_map` 1000 items @ 8 | 31 µs |
+| `parallel_for_each` 1000 items @ 8 | 12 µs |
+| `parallel_map` 1000 items @ 8 | 29 µs |
 
 `parallel_map` and `parallel_for_each` spawn `concurrency` workers that pull
 from a shared iterator rather than one task per item, and each worker claims a
