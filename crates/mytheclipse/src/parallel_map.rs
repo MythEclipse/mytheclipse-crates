@@ -5,11 +5,14 @@
 //! [`parallel_for_each`] is a streaming variant that never materializes the
 //! whole input in memory. These remove the manual `Semaphore + join_all` +
 //! error-aggregation boilerplate that races easily when done by hand.
+//!
+//! Both spawn exactly `concurrency` worker tasks that pull items from a shared
+//! iterator instead of one task per item: the bound then limits *task
+//! creation* as well as running work, and the per-item cost is a mutex
+//! hand-off rather than a `tokio::spawn`.
 
 use std::future::Future;
-use std::sync::Arc;
-
-use tokio::sync::Semaphore;
+use std::sync::{Arc, Mutex};
 
 use crate::aggregate_error::AggregateError;
 
@@ -53,8 +56,8 @@ impl ParallelConcurrency for () {
 /// futures in flight, and returns the results **in input order**.
 ///
 /// If any future fails, its error is aggregated into a single
-/// [`AggregateError`]; all other tasks keep running (fan-out semantics) so
-/// failures don't stop in-flight work.
+/// [`AggregateError`]; every other item still gets processed (fan-out
+/// semantics) so a failure doesn't stop in-flight work.
 ///
 /// Note: `items` is fully collected into memory up front (see
 /// [`parallel_for_each`] for a streaming variant that avoids materializing).
@@ -89,45 +92,66 @@ where
     E: std::error::Error + Send + Sync + 'static,
     C: ParallelConcurrency,
 {
-    let n = concurrency.resolve();
     let items: Vec<I::Item> = items.into_iter().collect();
-    let sem = Arc::new(Semaphore::new(n));
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let len = items.len();
+    let workers = concurrency.resolve().min(len);
+
+    // Workers take the next item under a short lock and hand the result back
+    // tagged with its index, so ordering needs no shared output buffer.
+    let queue = Arc::new(Mutex::new(items.into_iter().enumerate()));
     let f = Arc::new(f);
 
-    let mut tasks = Vec::with_capacity(items.len());
-    for item in items {
-        let sem = Arc::clone(&sem);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = Arc::clone(&queue);
         let f = Arc::clone(&f);
-        tasks.push(tokio::spawn(async move {
-            let _permit = sem.acquire_owned().await.expect("semaphore closed");
-            f(item).await
+        handles.push(tokio::spawn(async move {
+            let mut done: Vec<(usize, Result<T, E>)> = Vec::new();
+            loop {
+                let next = {
+                    let mut q = queue.lock().expect("item queue poisoned");
+                    q.next()
+                };
+                let Some((index, item)) = next else { break };
+                done.push((index, f(item).await));
+            }
+            done
         }));
     }
 
-    let mut results = Vec::with_capacity(tasks.len());
+    let mut slots: Vec<Option<T>> = Vec::new();
+    slots.resize_with(len, || None);
     let mut errors = AggregateError::empty();
-    for handle in tasks {
+    for handle in handles {
         match handle.await {
-            Ok(Ok(v)) => results.push(v),
-            Ok(Err(e)) => errors.push(Box::new(e)),
+            Ok(done) => {
+                for (index, result) in done {
+                    match result {
+                        Ok(value) => slots[index] = Some(value),
+                        Err(e) => errors.push(Box::new(e)),
+                    }
+                }
+            }
             Err(join_err) => errors.push(Box::new(join_err)),
         }
     }
 
-    if errors.is_empty() {
-        Ok(results)
-    } else {
-        Err(errors)
+    if !errors.is_empty() {
+        return Err(errors);
     }
+    Ok(slots
+        .into_iter()
+        .map(|slot| slot.expect("every index is written by exactly one worker"))
+        .collect())
 }
 
-/// Like [`parallel_map`] but aliased for clarity — because `tokio::spawn`
-/// futures are polled in spawn order here, results come back in input order.
-/// (True completion-order collection would require a `futures` dependency, so
-/// this name is provided for API symmetry and documented as input-ordered.)
+/// Alias of [`parallel_map`] kept for API symmetry.
 ///
-/// `concurrency` accepts an explicit `usize` or `()` to auto-size from the
-/// host CPU (see [`ParallelConcurrency`]).
+/// Results still come back in **input order**: workers tag each result with
+/// its index, so completion order never leaks into the output.
 pub async fn parallel_map_unordered<I, T, F, Fut, E, C>(
     items: I,
     concurrency: C,
@@ -142,36 +166,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
     C: ParallelConcurrency,
 {
-    let n = concurrency.resolve();
-    let items: Vec<I::Item> = items.into_iter().collect();
-    let sem = Arc::new(Semaphore::new(n));
-    let f = Arc::new(f);
-
-    let mut tasks = Vec::with_capacity(items.len());
-    for item in items {
-        let sem = Arc::clone(&sem);
-        let f = Arc::clone(&f);
-        tasks.push(tokio::spawn(async move {
-            let _permit = sem.acquire_owned().await.expect("semaphore closed");
-            f(item).await
-        }));
-    }
-
-    let mut results = Vec::with_capacity(tasks.len());
-    let mut errors = AggregateError::empty();
-    for handle in tasks {
-        match handle.await {
-            Ok(Ok(v)) => results.push(v),
-            Ok(Err(e)) => errors.push(Box::new(e)),
-            Err(join_err) => errors.push(Box::new(join_err)),
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(results)
-    } else {
-        Err(errors)
-    }
+    parallel_map(items, concurrency, f).await
 }
 
 /// Streaming bounded parallel fan-out: runs `f` over each item with at most
@@ -180,9 +175,8 @@ where
 ///
 /// This is the right choice for large/streaming inputs (e.g. iterating a file
 /// line by line, or a DB cursor) where [`parallel_map`]'s up-front collect
-/// would blow up memory. Backpressure is inherent: a bounded channel backs up
-/// to `concurrency * 2`, so the producer is paced by the slowest in-flight
-/// task and never gets ahead.
+/// would blow up memory. The iterator is pulled on demand — a worker takes the
+/// next item only when it is free — so the producer can never run ahead.
 ///
 /// Errors are aggregated into a single [`AggregateError`].
 ///
@@ -224,50 +218,38 @@ where
     E: std::error::Error + Send + Sync + 'static,
     C: ParallelConcurrency,
 {
-    use tokio::sync::{mpsc, Mutex};
-
-    let n = concurrency.resolve();
-    let (tx, rx) = mpsc::channel::<I::Item>(n * 2);
+    let workers = concurrency.resolve();
+    let queue = Arc::new(Mutex::new(items.into_iter()));
     let f = Arc::new(f);
-    let sem = Arc::new(Semaphore::new(n));
 
-    // Producer: feed items into the bounded channel (backpressures when all
-    // workers are busy — no full materialization).
-    tokio::spawn(async move {
-        for item in items {
-            if tx.send(item).await.is_err() {
-                break; // all workers dropped
-            }
-        }
-    });
-
-    // A `mpsc::Receiver` is not Clone, so workers share it behind a mutex and
-    // take turns receiving. Bounded concurrency is enforced by the semaphore.
-    let rx = Arc::new(Mutex::new(rx));
-    let mut handles = Vec::with_capacity(n);
-    for _ in 0..n {
-        let rx = Arc::clone(&rx);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = Arc::clone(&queue);
         let f = Arc::clone(&f);
-        let sem = Arc::clone(&sem);
         handles.push(tokio::spawn(async move {
+            let mut errors: Vec<Box<dyn std::error::Error + Send + Sync>> = Vec::new();
             loop {
-                let item = { rx.lock().await.recv().await };
-                match item {
-                    Some(item) => {
-                        let sem = Arc::clone(&sem);
-                        let _permit = sem.acquire_owned().await.expect("semaphore closed");
-                        let _ = f(item).await;
-                    }
-                    None => break,
+                let next = {
+                    let mut q = queue.lock().expect("item queue poisoned");
+                    q.next()
+                };
+                let Some(item) = next else { break };
+                if let Err(e) = f(item).await {
+                    errors.push(Box::new(e));
                 }
             }
+            errors
         }));
     }
 
     let mut errors = AggregateError::empty();
-    for h in handles {
-        match h.await {
-            Ok(()) => {}
+    for handle in handles {
+        match handle.await {
+            Ok(worker_errors) => {
+                for error in worker_errors {
+                    errors.push(error);
+                }
+            }
             Err(join_err) => errors.push(Box::new(join_err)),
         }
     }
@@ -332,5 +314,65 @@ mod tests {
         .await;
         assert!(out.is_ok());
         assert_eq!(count.load(Ordering::SeqCst), 5);
+    }
+
+    /// The bound must cap futures in flight, not just task creation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrency_bound_is_respected() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (i, p) = (Arc::clone(&in_flight), Arc::clone(&peak));
+
+        parallel_map(0..64u32, 4, move |x| {
+            let (i, p) = (Arc::clone(&i), Arc::clone(&p));
+            async move {
+                let now = i.fetch_add(1, Ordering::SeqCst) + 1;
+                p.fetch_max(now, Ordering::SeqCst);
+                tokio::task::yield_now().await;
+                i.fetch_sub(1, Ordering::SeqCst);
+                Ok::<_, std::io::Error>(x)
+            }
+        })
+        .await
+        .unwrap();
+
+        let observed = peak.load(Ordering::SeqCst);
+        assert!(observed <= 4, "peak in-flight {observed} exceeded bound 4");
+    }
+
+    /// Every index must be written exactly once and stay in input order even
+    /// when completion order is scrambled by yielding.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn all_results_land_in_input_order() {
+        let out = parallel_map(0..500u32, 8, |x| async move {
+            tokio::task::yield_now().await;
+            Ok::<_, std::io::Error>(x)
+        })
+        .await
+        .unwrap();
+        assert_eq!(out, (0..500).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn for_each_aggregates_errors_and_keeps_going() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = Arc::new(AtomicUsize::new(0));
+        let s = Arc::clone(&seen);
+        let out = parallel_for_each(0..10u32, 2, move |x| {
+            let s = Arc::clone(&s);
+            async move {
+                s.fetch_add(1, Ordering::SeqCst);
+                if x % 2 == 0 {
+                    Err(std::io::Error::other("even"))
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert_eq!(out.unwrap_err().len(), 5);
+        assert_eq!(seen.load(Ordering::SeqCst), 10);
     }
 }
