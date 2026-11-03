@@ -1,13 +1,14 @@
 //! Bounded parallel map over collections (feature `resiliency`).
 //!
-//! [`parallel_map`], [`parallel_map_unordered`] fan work out across a
-//! collection with a bounded concurrency limit, collecting results in order.
-//! [`parallel_for_each`] is a streaming variant that never materializes the
-//! whole input in memory. These remove the manual `Semaphore + join_all` +
-//! error-aggregation boilerplate that races easily when done by hand.
+//! [`parallel_map`] and [`parallel_map_unordered`] fan work out across a
+//! collection with a bounded concurrency limit, returning results in input order
+//! and in completion order respectively. [`parallel_for_each`] is a streaming
+//! variant that never materializes the whole input in memory. These remove the
+//! manual `Semaphore + join_all` + error-aggregation boilerplate that races
+//! easily when done by hand.
 //!
-//! Both spawn exactly `concurrency` worker tasks that pull items from a shared
-//! iterator instead of one task per item: the bound then limits *task
+//! All three spawn exactly `concurrency` worker tasks that pull items from a
+//! shared iterator instead of one task per item: the bound then limits *task
 //! creation* as well as running work, and the per-item cost is a claim from a
 //! shared iterator (amortized over a small batch) rather than a
 //! `tokio::spawn`.
@@ -67,6 +68,84 @@ fn handoff_batch(len: usize, workers: usize) -> usize {
 /// Claim size for [`parallel_for_each`], whose stream length is unknown.
 const STREAM_BATCH: usize = 8;
 
+/// Drains `queue` through `work`, folding every outcome into `acc`.
+///
+/// This is the whole bounded fan-out: claim a batch under the lock, release the
+/// lock, run the batch. The three entry points differ only in what they keep —
+/// an indexed result per item for [`parallel_map`], a failure for
+/// [`parallel_for_each`], or nothing at all for [`parallel_map_unordered`],
+/// which hands each result straight on.
+///
+/// `record` is what keeps the cost honest: folding rather than collecting means
+/// [`parallel_for_each`] never writes a per-item slot for a success it is going
+/// to throw away.
+async fn drain_claims<It, W, Fut, O, A, S>(
+    queue: Arc<Mutex<It>>,
+    batch: usize,
+    work: W,
+    mut acc: A,
+    mut record: S,
+) -> A
+where
+    It: Iterator + Send,
+    It::Item: Send,
+    W: Fn(It::Item) -> Fut,
+    Fut: Future<Output = O> + Send,
+    S: FnMut(&mut A, O),
+{
+    let mut claimed = Vec::with_capacity(batch);
+    loop {
+        {
+            let mut queue = queue.lock().expect("item queue poisoned");
+            claimed.extend(queue.by_ref().take(batch));
+        }
+        if claimed.is_empty() {
+            break;
+        }
+        for item in claimed.drain(..) {
+            record(&mut acc, work(item).await);
+        }
+    }
+    acc
+}
+
+/// Spawns `workers` tasks that each drain `queue` through `work`.
+///
+/// `work` and `record` are cloned once per worker: cloning per *item* would put
+/// every item through an atomic refcount update on a cache line that all
+/// workers share.
+fn spawn_workers<It, W, Fut, O, A, S, N>(
+    queue: &Arc<Mutex<It>>,
+    workers: usize,
+    batch: usize,
+    work: W,
+    new_acc: N,
+    record: S,
+) -> Vec<tokio::task::JoinHandle<A>>
+where
+    It: Iterator + Send + 'static,
+    It::Item: Send + 'static,
+    W: Fn(It::Item) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = O> + Send + 'static,
+    S: FnMut(&mut A, O) + Clone + Send + 'static,
+    N: Fn() -> A + Clone + Send + 'static,
+    O: Send + 'static,
+    A: Send + 'static,
+{
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = Arc::clone(queue);
+        handles.push(tokio::spawn(drain_claims(
+            queue,
+            batch,
+            work.clone(),
+            new_acc.clone()(),
+            record.clone(),
+        )));
+    }
+    handles
+}
+
 /// Runs `f` over every element of `items`, with at most `concurrency`
 /// futures in flight, and returns the results **in input order**.
 ///
@@ -118,32 +197,20 @@ where
     // tagged with its index, so ordering needs no shared output buffer.
     let queue = Arc::new(Mutex::new(items.into_iter().enumerate()));
     let f = Arc::new(f);
-    let batch = handoff_batch(len, workers);
-
-    let mut handles = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let queue = Arc::clone(&queue);
-        let f = Arc::clone(&f);
-        handles.push(tokio::spawn(async move {
-            // One slot per item this worker is expected to handle, so the
-            // result vector does not reallocate on the way to `len / workers`.
-            let mut done: Vec<(usize, Result<T, E>)> = Vec::with_capacity(len / workers + batch);
-            let mut claimed: Vec<(usize, I::Item)> = Vec::with_capacity(batch);
-            loop {
-                {
-                    let mut q = queue.lock().expect("item queue poisoned");
-                    claimed.extend(q.by_ref().take(batch));
-                }
-                if claimed.is_empty() {
-                    break;
-                }
-                for (index, item) in claimed.drain(..) {
-                    done.push((index, f(item).await));
-                }
-            }
-            done
-        }));
-    }
+    let work = move |(index, item): (usize, I::Item)| {
+        // Called here, on the worker's own `Arc`: the future `f` returns owns
+        // what it needs, so the async block below carries only the index.
+        let fut = f(item);
+        async move { (index, fut.await) }
+    };
+    let handles = spawn_workers(
+        &queue,
+        workers,
+        handoff_batch(len, workers),
+        work,
+        move || Vec::<(usize, Result<T, E>)>::with_capacity(len / workers + 1),
+        |done: &mut Vec<(usize, Result<T, E>)>, out| done.push(out),
+    );
 
     let mut slots: Vec<Option<T>> = Vec::new();
     slots.resize_with(len, || None);
@@ -171,10 +238,33 @@ where
         .collect())
 }
 
-/// Alias of [`parallel_map`] kept for API symmetry.
+/// Like [`parallel_map`], but returns results in **completion order** rather
+/// than input order.
 ///
-/// Results still come back in **input order**: workers tag each result with
-/// its index, so completion order never leaks into the output.
+/// Use this when the caller does not care which item produced which result: it
+/// skips the index tagging and the slot vector, so a result is handed over the
+/// moment it finishes instead of waiting behind the slowest item that happens to
+/// sit earlier in the input. If order matters, use [`parallel_map`].
+///
+/// Errors are aggregated into a single [`AggregateError`], as with
+/// [`parallel_map`].
+///
+/// ```
+/// use mytheclipse::parallel_map::parallel_map_unordered;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let out = parallel_map_unordered(vec![1u32, 2, 3], 2, |x| async move {
+///         Ok::<_, std::io::Error>(x * 2)
+///     })
+///     .await
+///     .unwrap();
+///     // Order is unspecified; the set of results is what matters.
+///     let mut sorted = out;
+///     sorted.sort_unstable();
+///     assert_eq!(sorted, vec![2, 4, 6]);
+/// }
+/// ```
 pub async fn parallel_map_unordered<I, T, F, Fut, E, C>(
     items: I,
     concurrency: C,
@@ -189,7 +279,53 @@ where
     E: std::error::Error + Send + Sync + 'static,
     C: ParallelConcurrency,
 {
-    parallel_map(items, concurrency, f).await
+    let items: Vec<I::Item> = items.into_iter().collect();
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let len = items.len();
+    let workers = concurrency.resolve().min(len);
+
+    // Each result is sent the moment it completes, so arrival order on the
+    // channel is completion order.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let queue = Arc::new(Mutex::new(items.into_iter()));
+    let f = Arc::new(f);
+    let work = move |item: I::Item| f(item);
+    // Each worker gets its own sender clone; the original is consumed here, so
+    // only the workers' clones remain and `recv` ends once they all exit.
+    let handles = spawn_workers(
+        &queue,
+        workers,
+        handoff_batch(len, workers),
+        work,
+        || (),
+        move |_: &mut (), result| {
+            // A closed receiver means the collector is gone; the result is
+            // unclaimed and there is nothing left to do with it.
+            let _ = tx.send(result);
+        },
+    );
+
+    let mut out = Vec::with_capacity(len);
+    let mut errors = AggregateError::empty();
+    while let Some(result) = rx.recv().await {
+        match result {
+            Ok(value) => out.push(value),
+            Err(e) => errors.push(Box::new(e)),
+        }
+    }
+    for handle in handles {
+        if let Err(join_err) = handle.await {
+            errors.push(Box::new(join_err));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(out)
+    } else {
+        Err(errors)
+    }
 }
 
 /// Streaming bounded parallel fan-out: runs `f` over each item with at most
@@ -235,7 +371,7 @@ pub async fn parallel_for_each<I, F, Fut, E, C>(
 where
     I: IntoIterator + Send + 'static,
     I::Item: Send + 'static,
-    I::IntoIter: Send,
+    I::IntoIter: Send + 'static,
     F: Fn(I::Item) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), E>> + Send + 'static,
     E: std::error::Error + Send + Sync + 'static,
@@ -244,41 +380,28 @@ where
     let workers = concurrency.resolve();
     let queue = Arc::new(Mutex::new(items.into_iter()));
     let f = Arc::new(f);
+    let work = move |item: I::Item| f(item);
     // The stream length is unknown, so the claim size is fixed: big enough to
     // amortize the hand-off lock, small enough to keep read-ahead bounded.
-    let batch = STREAM_BATCH;
-
-    let mut handles = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let queue = Arc::clone(&queue);
-        let f = Arc::clone(&f);
-        handles.push(tokio::spawn(async move {
-            let mut errors: Vec<Box<dyn std::error::Error + Send + Sync>> = Vec::new();
-            let mut claimed: Vec<I::Item> = Vec::with_capacity(batch);
-            loop {
-                {
-                    let mut q = queue.lock().expect("item queue poisoned");
-                    claimed.extend(q.by_ref().take(batch));
-                }
-                if claimed.is_empty() {
-                    break;
-                }
-                for item in claimed.drain(..) {
-                    if let Err(e) = f(item).await {
-                        errors.push(Box::new(e));
-                    }
-                }
+    let handles = spawn_workers(
+        &queue,
+        workers,
+        STREAM_BATCH,
+        work,
+        Vec::<E>::new,
+        |errors: &mut Vec<E>, result: Result<(), E>| {
+            if let Err(e) = result {
+                errors.push(e);
             }
-            errors
-        }));
-    }
+        },
+    );
 
     let mut errors = AggregateError::empty();
     for handle in handles {
         match handle.await {
             Ok(worker_errors) => {
                 for error in worker_errors {
-                    errors.push(error);
+                    errors.push(Box::new(error));
                 }
             }
             Err(join_err) => errors.push(Box::new(join_err)),
@@ -328,6 +451,54 @@ mod tests {
             })
             .await;
         assert_eq!(out.unwrap(), vec![]);
+    }
+
+    #[tokio::test]
+    async fn unordered_returns_every_result() {
+        let mut out = parallel_map_unordered(0..50u32, 4, |x| async move {
+            tokio::task::yield_now().await;
+            Ok::<_, std::io::Error>(x)
+        })
+        .await
+        .unwrap();
+        out.sort_unstable();
+        assert_eq!(out, (0..50).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn unordered_aggregates_errors() {
+        let out = parallel_map_unordered(0..6u32, 2, |x| async move {
+            if x % 2 == 0 {
+                Err(std::io::Error::other("even"))
+            } else {
+                Ok::<_, std::io::Error>(x)
+            }
+        })
+        .await;
+        assert_eq!(out.unwrap_err().len(), 3);
+    }
+
+    /// Completion order, not input order: an item that finishes last must be
+    /// reported last even though it sits first in the input.
+    #[tokio::test]
+    async fn unordered_reports_results_as_they_finish() {
+        let out = parallel_map_unordered(0..4u32, 4, |x| async move {
+            if x == 0 {
+                for _ in 0..50 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            Ok::<_, std::io::Error>(x)
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(out.len(), 4);
+        assert_eq!(
+            out.last(),
+            Some(&0),
+            "the slowest item must arrive last, got {out:?}"
+        );
     }
 
     #[tokio::test]
