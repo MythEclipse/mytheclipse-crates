@@ -1,18 +1,42 @@
-//! In-process job queue using `tokio::sync::Mutex` + `Notify`.
+//! In-process job queue: a topic map guarded by an `RwLock` plus one
+//! `Mutex<Vec<Job>>` + `Notify` per topic.
+//!
+//! Both locks are synchronous. Neither is ever held across an `.await`, so
+//! there is nothing for an async mutex to buy here — and a `std` mutex avoids
+//! the waker-list bookkeeping an async one pays on every acquisition. Topic
+//! lookup takes the map's read lock, so producers and consumers on the same
+//! topic do not serialize on a global lock.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Notify;
 
 use crate::error::{JobError, QueueError};
 use crate::job::{Job, JobId};
 use crate::traits::Queue;
 
 struct TopicQueue {
+    /// Jobs waiting to be delivered. Never locked across an `.await`.
     jobs: Mutex<Vec<Job>>,
     notify: Notify,
+}
+
+impl TopicQueue {
+    fn new() -> Self {
+        Self {
+            jobs: Mutex::new(Vec::new()),
+            notify: Notify::new(),
+        }
+    }
+
+    /// Pushes `job` and wakes one waiting consumer.
+    fn push(&self, job: Job) {
+        self.jobs.lock().expect("job queue poisoned").push(job);
+        self.notify.notify_one();
+    }
 }
 
 impl std::fmt::Debug for TopicQueue {
@@ -26,21 +50,10 @@ impl std::fmt::Debug for TopicQueue {
     }
 }
 
-struct Inner {
-    topics: std::collections::HashMap<String, Arc<TopicQueue>>,
-}
-
-impl std::fmt::Debug for Inner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let keys: Vec<&String> = self.topics.keys().collect();
-        f.debug_struct("Inner").field("topics", &keys).finish()
-    }
-}
-
 /// An in-memory queue. Each topic is a shared mutex-protected vector + Notify.
 #[derive(Clone)]
 pub struct InMemoryQueue {
-    inner: Arc<Mutex<Inner>>,
+    topics: Arc<RwLock<HashMap<String, Arc<TopicQueue>>>>,
 }
 
 impl std::fmt::Debug for InMemoryQueue {
@@ -58,53 +71,47 @@ impl Default for InMemoryQueue {
 impl InMemoryQueue {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner {
-                topics: std::collections::HashMap::new(),
-            })),
+            topics: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    async fn get_topic(&self, topic: &str) -> Arc<TopicQueue> {
-        let mut inner = self.inner.lock().await;
-        inner
-            .topics
-            .entry(topic.to_string())
-            .or_insert_with(|| {
-                Arc::new(TopicQueue {
-                    jobs: Mutex::new(Vec::new()),
-                    notify: Notify::new(),
-                })
-            })
-            .clone()
+    /// The queue for `topic`, created on first use. Existing topics are served
+    /// from the read lock and without allocating a key.
+    fn topic(&self, topic: &str) -> Arc<TopicQueue> {
+        let existing = self.topics.read().unwrap().get(topic).cloned();
+        if let Some(tq) = existing {
+            return tq;
+        }
+        let mut topics = self.topics.write().unwrap();
+        Arc::clone(
+            topics
+                .entry(topic.to_owned())
+                .or_insert_with(|| Arc::new(TopicQueue::new())),
+        )
     }
 }
 
 #[async_trait]
 impl Queue for InMemoryQueue {
     async fn enqueue(&self, topic: &str, payload: Vec<u8>) -> Result<(), QueueError> {
-        let tq = self.get_topic(topic).await;
-        tq.jobs
-            .lock()
-            .await
-            .push(Job::new(JobId::generate(), topic, payload));
-        tq.notify.notify_one();
+        let job = Job::new(JobId::generate(), topic, payload);
+        self.topic(topic).push(job);
         Ok(())
     }
 
     async fn dequeue(&self, topic: &str, timeout: Duration) -> Result<Option<Job>, QueueError> {
-        let tq = self.get_topic(topic).await;
-        let tq2 = Arc::clone(&tq);
+        let tq = self.topic(topic);
+        let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            if let Some(job) = tq.jobs.lock().await.pop() {
+            if let Some(job) = tq.jobs.lock().expect("job queue poisoned").pop() {
                 return Ok(Some(job));
             }
+            // One deadline for the whole call, so a spurious wake-up does not
+            // restart the wait.
             tokio::select! {
-                _ = tq2.notify.notified() => {}
-                _ = tokio::time::sleep(timeout) => {
-                    if let Some(job) = tq.jobs.lock().await.pop() {
-                        return Ok(Some(job));
-                    }
-                    return Ok(None);
+                _ = tq.notify.notified() => {}
+                _ = tokio::time::sleep_until(deadline) => {
+                    return Ok(tq.jobs.lock().expect("job queue poisoned").pop());
                 }
             }
         }
@@ -116,7 +123,7 @@ impl Queue for InMemoryQueue {
 
     async fn nack(&self, job: &Job, requeue: bool) -> Result<(), JobError> {
         if requeue {
-            let tq = self.get_topic(&job.topic).await;
+            let tq = self.topic(&job.topic);
             // Requeue the *same* job (same id) with its attempt count advanced:
             // a fresh `Job::new` would reset the counter and make the worker's
             // retry budget unenforceable (endless redelivery, never a DLQ).
@@ -125,23 +132,20 @@ impl Queue for InMemoryQueue {
                 delivered_at: Some(std::time::SystemTime::now()),
                 ..job.clone()
             };
-            tq.jobs.lock().await.push(retried);
-            tq.notify.notify_one();
+            tq.push(retried);
         }
         Ok(())
     }
 
     async fn dlq_move(&self, topic: &str, job: Job) -> Result<(), QueueError> {
         let dlq_topic = format!("dlq:{topic}");
-        let tq = self.get_topic(&dlq_topic).await;
-        tq.jobs.lock().await.push(job);
-        tq.notify.notify_one();
+        self.topic(&dlq_topic).push(job);
         Ok(())
     }
 
     async fn len(&self, topic: &str) -> Result<u64, QueueError> {
-        let tq = self.get_topic(topic).await;
-        let guard = tq.jobs.lock().await;
+        let tq = self.topic(topic);
+        let guard = tq.jobs.lock().expect("job queue poisoned");
         Ok(guard.len() as u64)
     }
 }

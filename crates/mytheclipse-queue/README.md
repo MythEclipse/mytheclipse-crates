@@ -4,7 +4,7 @@ A unified job queue abstraction so your background work isn't locked to one
 transport. Provides a single `Queue` trait, `Job` type, and `WorkerPool` executor
 with configurable retry/backoff, concurrency, and a dead-letter queue.
 
-Today there is **one backend: in-memory** (`tokio::sync::mpsc` + task spawning,
+Today there is **one backend: in-memory** (a `Mutex<Vec<Job>>` + `Notify` per topic,
 no external service). `Queue` is a trait, so another transport can implement it
 without touching `WorkerPool`.
 

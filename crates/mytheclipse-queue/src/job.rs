@@ -41,13 +41,16 @@ pub struct Job {
 
 impl Job {
     pub fn new(id: JobId, topic: &str, payload: Vec<u8>) -> Self {
+        // One clock read for both timestamps: they describe the same instant,
+        // and `SystemTime::now()` is not free.
+        let now = SystemTime::now();
         Self {
             id,
             topic: topic.to_string(),
             payload,
             attempt: 0,
-            enqueued_at: SystemTime::now(),
-            delivered_at: Some(SystemTime::now()),
+            enqueued_at: now,
+            delivered_at: Some(now),
             visibility_timeout: None,
         }
     }

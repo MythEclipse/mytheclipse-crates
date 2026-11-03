@@ -28,3 +28,10 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "queue"
+path = "benches/queue.rs"
+harness = false
+required-features = ["in-memory"]
