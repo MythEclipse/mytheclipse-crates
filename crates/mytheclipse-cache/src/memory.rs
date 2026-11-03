@@ -204,8 +204,8 @@ impl Cache for MemoryCache {
 
 /// A typed view over a byte cache using `serde`-compatible (JSON) encoding.
 ///
-/// Only enabled with the `cache-aside` feature, which pulls in `serde`.
-#[cfg(feature = "cache-aside")]
+/// Only enabled with the `typed` feature, which pulls in `serde`.
+#[cfg(feature = "typed")]
 pub mod typed {
     use serde::{de::DeserializeOwned, Serialize};
 
@@ -336,7 +336,7 @@ mod tests {
         assert!(c.state.read().unwrap().order.is_empty());
     }
 
-    #[cfg(feature = "cache-aside")]
+    #[cfg(feature = "typed")]
     #[tokio::test]
     async fn typed_cache_roundtrip() {
         use typed::TypedCache;

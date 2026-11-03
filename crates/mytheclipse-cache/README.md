@@ -10,6 +10,7 @@ provider. Combines an in-process **L1** cache with a distributed **L2** cache
 - `l1-memory` (default) — zero-dependency in-process cache.
 - `l2-redis` — Redis/Valkey L2 via `fred`.
 - `cache-aside` (default) — read-through cache-aside helper.
+- `typed` — `TypedCache`, JSON get/set over any `Cache` (adds `serde`).
 
 ## Usage
 

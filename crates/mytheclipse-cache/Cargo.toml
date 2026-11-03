@@ -20,7 +20,9 @@ l1-memory = []
 # L2 (distributed) backends.
 l2-redis = ["l1-memory", "dep:redis"]
 # Cache-aside + auto-refresh helper.
-cache-aside = ["l1-memory", "dep:serde", "dep:serde_json", "dep:tokio"]
+cache-aside = ["l1-memory", "dep:tokio"]
+# JSON-typed get/set over any `Cache` (`serde` + `serde_json`).
+typed = ["cache-aside", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 tracing = "0.1"
