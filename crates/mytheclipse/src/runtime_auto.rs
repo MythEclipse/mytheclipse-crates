@@ -4,8 +4,8 @@
 //! counts from the host CPU topology (via [`std::thread::available_parallelism`])
 //! so callers don't have to hand-tune `worker_threads` / `max_blocking_threads`.
 //!
-//! The same helpers let you size a [`rayon::ThreadPoolBuilder`] or any other
-//! pool builder without pulling in `num_cpus`.
+//! The same helpers let you size a thread pool builder of your choice without
+//! pulling in an extra CPU-counting crate.
 //!
 //! ## Rationale
 //!
@@ -19,7 +19,7 @@ use std::num::NonZeroUsize;
 /// Auto-computed runtime thread counts derived from the host CPU topology.
 ///
 /// Each field is a concrete `usize` (never zero) so it can be fed directly
-/// into a tokio/rayon/std-thread builder with no further `max(1)` guards.
+/// into a tokio or std-thread builder with no further `max(1)` guards.
 ///
 /// ```
 /// use mytheclipse::runtime_auto::RuntimeConfig;
@@ -91,19 +91,6 @@ pub fn available_parallelism() -> usize {
     std::thread::available_parallelism()
         .map(NonZeroUsize::get)
         .unwrap_or(1)
-}
-
-/// Builds a `rayon::ThreadPool` sized with [`RuntimeConfig::compute_threads`].
-///
-/// Returns `None` when rayon isn't enabled — call this in code that's gated
-/// on the `compute` feature to avoid a compile error.
-#[cfg(feature = "compute")]
-pub fn build_rayon_pool(config: &RuntimeConfig) -> rayon::ThreadPool {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(config.compute_threads)
-        .thread_name(|i| format!("mytheclipse-compute-{i}"))
-        .build()
-        .expect("failed to build rayon compute pool")
 }
 
 #[cfg(test)]

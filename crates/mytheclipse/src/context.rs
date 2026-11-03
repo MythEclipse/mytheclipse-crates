@@ -18,12 +18,10 @@ static CONTEXT: OnceLock<EngineContext> = OnceLock::new();
 pub struct EngineContext {
     /// Logical CPU core count used for sizing async I/O scheduling.
     pub io_threads: usize,
-    /// Number of worker threads allocated to the compute [`rayon::ThreadPool`].
+    /// Number of worker threads the parallel compute primitives start.
     pub compute_threads: usize,
     /// Maximum number of background tasks permitted to run concurrently.
     pub bg_concurrency: usize,
-    #[cfg(feature = "compute")]
-    pub(crate) compute_pool: rayon::ThreadPool,
     #[cfg(feature = "bg")]
     pub(crate) bg_semaphore: tokio::sync::Semaphore,
 }
@@ -31,12 +29,6 @@ pub struct EngineContext {
 impl EngineContext {
     /// Builds a new [`EngineContext`] sized from the current machine's
     /// logical core count.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the compute thread pool cannot be constructed. This only
-    /// happens under an unrecoverable environment failure, such as the
-    /// operating system refusing to spawn any new thread.
     fn build() -> Self {
         // `available_parallelism` is the std answer to "how many threads should
         // I start" (it respects cgroup/affinity limits); it only fails on
@@ -48,13 +40,6 @@ impl EngineContext {
         let compute_threads = logical_cores.saturating_sub(1).max(1);
         let bg_concurrency = (logical_cores / 2).max(2);
 
-        #[cfg(feature = "compute")]
-        let compute_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(compute_threads)
-            .thread_name(|index| format!("mytheclipse-compute-{index}"))
-            .build()
-            .expect("mytheclipse: failed to build rayon compute thread pool");
-
         #[cfg(feature = "bg")]
         let bg_semaphore = tokio::sync::Semaphore::new(bg_concurrency);
 
@@ -62,8 +47,6 @@ impl EngineContext {
             io_threads,
             compute_threads,
             bg_concurrency,
-            #[cfg(feature = "compute")]
-            compute_pool,
             #[cfg(feature = "bg")]
             bg_semaphore,
         }

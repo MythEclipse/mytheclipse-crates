@@ -15,7 +15,6 @@ categories = ["asynchronous", "concurrency", "rust-patterns"]
 
 [dependencies]
 tokio = { version = "1.53", features = ["full"], optional = true }
-rayon = { version = "1.12", optional = true }
 tracing = "0.1"
 async-trait = "0.1"
 
@@ -27,7 +26,7 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [features]
 default = []
 io = ["dep:tokio"]
-compute = ["dep:rayon"]
+compute = []
 bg = ["dep:tokio"]
 resiliency = ["dep:tokio"]
 traffic = ["dep:tokio"]
