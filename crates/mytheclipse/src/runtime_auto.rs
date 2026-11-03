@@ -42,7 +42,7 @@ pub struct RuntimeConfig {
     pub worker_threads: usize,
     /// Extra threads reserved for blocking (tokio `max_blocking_threads`).
     pub max_blocking_threads: usize,
-    /// Rayon (compute) pool size.
+    /// Worker threads the compute pool is sized for.
     pub compute_threads: usize,
     /// Suggested background/IO pool size.
     pub io_threads: usize,

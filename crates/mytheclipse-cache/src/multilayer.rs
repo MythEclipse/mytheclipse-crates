@@ -12,9 +12,9 @@ use crate::traits::{Cache, CacheError};
 
 /// A read-through, write-through composition of an L1 and L2 cache.
 ///
-/// `L1` is typically [`crate::memory::MemoryCache`] or
-/// [`crate::moka_cache::MokaL1`]; `L2` is typically a distributed cache such
-/// as a Redis backend. Order of layers fixed: `L1` is consulted first.
+/// `L1` is typically [`crate::memory::MemoryCache`]; `L2` is typically a
+/// distributed cache such as a Redis backend. Order of layers fixed: `L1` is
+/// consulted first.
 #[derive(Clone)]
 pub struct MultiLayerCache<L1, L2> {
     l1: L1,

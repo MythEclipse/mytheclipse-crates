@@ -10,7 +10,7 @@
 //! workload needs:
 //!
 //! - [`spawn_io`] (feature `io`) — spawn an async I/O task, tracing-instrumented.
-//! - [`compute()`] (feature `compute`) — run CPU-bound work on a sized Rayon pool, panic-isolated.
+//! - [`compute()`] (feature `compute`) — run CPU-bound work on a sized worker pool, panic-isolated.
 //! - [`spawn_bg`] (feature `bg`) — spawn a background task under bounded concurrency.
 //! - [`retry()`] / [`CircuitBreaker`] / [`timeout()`] (feature `resiliency`) — fault tolerance.
 //! - [`RateLimiter`] / [`BackpressureQueue`] / [`ConcurrencyLimiter`] (feature `traffic`) — load control.
