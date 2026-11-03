@@ -1,3 +1,10 @@
+## [4.0.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.0.0...v4.0.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **cron:** jump to the next matching field instead of scanning minutes ([9fcb052](https://github.com/MythEclipse/mytheclipse-crates/commit/9fcb052cc1107d28f46198f49b52100473b84f69))
+
 # [4.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v3.0.0...v4.0.0) (2026-11-03)
 
 
