@@ -1,6 +1,6 @@
 [package]
 name = "mytheclipse"
-version = "1.22.2"
+version = "1.23.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"

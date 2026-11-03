@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-cache"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-cli"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "clap",
  "tokio",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-event"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-queue"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1527,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "mytheclipse-tracing"
-version = "1.22.2"
+version = "1.23.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",

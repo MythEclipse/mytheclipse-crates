@@ -1,3 +1,18 @@
+# [1.23.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.2...v1.23.0) (2026-11-03)
+
+
+### Bug Fixes
+
+* **cache:** serve reads from a shared lock without reading the clock ([4c551c5](https://github.com/MythEclipse/mytheclipse-crates/commit/4c551c584d0f0225c3841e3fc014f8298cd28e93))
+* **event:** publish without allocating a key or an exclusive lock ([022284a](https://github.com/MythEclipse/mytheclipse-crates/commit/022284ad43221769584b4a24d33f1d48b632b303))
+* **queue:** take the async mutex off the job path ([0c399e7](https://github.com/MythEclipse/mytheclipse-crates/commit/0c399e76c8b41e4f1bbd31b3ac448f80ff670706))
+* **resiliency:** claim items in batches instead of one lock per item ([3bf2ee1](https://github.com/MythEclipse/mytheclipse-crates/commit/3bf2ee19546f0e4e40a6d1f12c03a0d510e59a13))
+
+
+### Features
+
+* **queue:** size worker concurrency from the host ([99e937a](https://github.com/MythEclipse/mytheclipse-crates/commit/99e937aa4522dea1f28fe1a7573d79cd7f4547a1))
+
 ## [1.22.2](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.1...v1.22.2) (2026-11-03)
 
 
