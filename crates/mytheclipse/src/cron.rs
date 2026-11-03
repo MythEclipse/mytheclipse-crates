@@ -118,21 +118,31 @@ impl CronSchedule {
     /// Returns the next fire time strictly after `from`, or `None` if the
     /// expression cannot fire within the scan horizon (e.g. Feb 30).
     ///
-    /// Scans forward minute-by-minute up to roughly five years.
+    /// Walks whole minutes, skipping to the next day whenever the current date
+    /// can never match (so a yearly schedule costs days, not 500k minutes).
+    /// The horizon is still ~five years of minutes.
     pub fn next_after(&self, from: CronTime) -> Option<CronTime> {
+        let horizon = 5 * 366 * 24 * 60; // minutes in ~5 years
+        let mut spent = 0u32;
         // Scan whole minutes (second = 0), starting strictly after `from`.
         let mut act = from.advance_minute();
-        let horizon = 5 * 366 * 24 * 60; // minutes in ~5 years
-        for _ in 0..horizon {
+        while spent < horizon {
             if self.matches(act) {
                 return Some(act);
             }
-            act = act.advance_minute();
+            if self.date_matches(act) {
+                act = act.advance_minute();
+                spent += 1;
+            } else {
+                act = act.next_day_start();
+                spent += 24 * 60;
+            }
         }
         None
     }
 
-    fn matches(&self, t: CronTime) -> bool {
+    /// Whether the month/day part of `t` can match at all.
+    fn date_matches(&self, t: CronTime) -> bool {
         let month_ok = self.months.contains(&(t.month as u8));
         let dom_ok = self.days_of_month.contains(&(t.day as u8));
         let dow_ok = self.days_of_week.contains(&(weekday(t) as u8));
@@ -147,8 +157,11 @@ impl CronSchedule {
             (false, true) => dow_ok,
             (false, false) => true,
         };
-        month_ok
-            && day_ok
+        month_ok && day_ok
+    }
+
+    fn matches(&self, t: CronTime) -> bool {
+        self.date_matches(t)
             && self.hours.contains(&(t.hour as u8))
             && self.minutes.contains(&(t.minute as u8))
     }
@@ -226,6 +239,12 @@ impl CronTime {
         let mut t = self.add_seconds(60);
         t.second = 0;
         t
+    }
+
+    /// The first minute of the following day.
+    fn next_day_start(self) -> Self {
+        let day_start = (self.to_timestamp().div_euclid(86_400) + 1) * 86_400;
+        from_timestamp(day_start)
     }
 
     fn add_seconds(self, secs: i64) -> Self {
@@ -461,6 +480,13 @@ mod tests {
     fn impossible_expression_returns_none() {
         let s = CronSchedule::parse("0 0 30 2 *").unwrap(); // Feb 30 never exists
         assert!(s.next_after(t(2026, 1, 1, 0, 0)).is_none());
+    }
+
+    #[test]
+    fn day_skipping_still_lands_on_the_exact_fire_time() {
+        let s = CronSchedule::parse("30 4 15 6 *").unwrap();
+        let next = s.next_after(t(2026, 6, 15, 4, 30)).unwrap();
+        assert_eq!(next, t(2027, 6, 15, 4, 30));
     }
 
     #[test]
