@@ -18,7 +18,7 @@ provider. Combines an in-process **L1** cache with a distributed **L2** cache
 adds `TypedCache` (JSON encoding via `serde`):
 
 ```rust
-use mytheclipse_cache::{MemoryCache, TypedCache};
+use mytheclipse_cache::prelude::*;
 
 let cache = TypedCache::new(MemoryCache::new());
 cache.set("orders:42", &Order { id: 42 }, None).await?;
@@ -28,7 +28,7 @@ let order: Option<Order> = cache.get("orders:42").await?;
 ## Usage
 
 ```rust
-use mytheclipse_cache::{Cache, MemoryCache, MultiLayerCache, CacheAside};
+use mytheclipse_cache::prelude::*;
 
 let cache = MultiLayerCache::new(
     MemoryCache::new(),          // L1

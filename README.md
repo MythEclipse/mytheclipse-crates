@@ -41,6 +41,27 @@ The cache and event crates move bytes by default. Their JSON-typed views
 (`TypedCache`, `TypedEventBus`) sit behind a `typed` feature, so a crate that
 only moves `Vec<u8>` does not compile `serde` at all.
 
+## One import per crate
+
+Each crate has a `prelude` holding the traits and the types you reach for first:
+
+```rust
+use mytheclipse::prelude::*;
+use mytheclipse_cache::prelude::*;
+use mytheclipse_event::prelude::*;
+use mytheclipse_queue::prelude::*;
+```
+
+The traits are the reason the preludes exist. `Cache::get`, `Queue::enqueue`,
+`EventBus::subscribe` and `Pool::acquire` are trait methods, so they are not
+callable until the trait is in scope — an import list naming only the concrete
+types compiles until the first method call, then fails with "no method named
+`get` found". The prelude carries the traits, so that cannot happen.
+
+`mytheclipse::init()` is **not** required. Every primitive sizes its own pool
+lazily on first use; calling `init()` up front just moves that cost off the
+first call.
+
 ## Performance
 
 Four criterion suites cover the hot primitives. None is a correctness gate —

@@ -24,7 +24,7 @@ service-to-service) communication isn't locked to one transport.
 no `serde`, no `serde_json`:
 
 ```rust
-use mytheclipse_event::{EventBus, InMemoryEventBus};
+use mytheclipse_event::prelude::*;
 
 let bus = InMemoryEventBus::default();
 let mut sub = bus.subscribe("orders").await?;
@@ -35,7 +35,7 @@ let payload = sub.recv().await?;
 With `features = ["typed"]` you get JSON encoding over the same trait:
 
 ```rust
-use mytheclipse_event::{InMemoryEventBus, TypedEventBus};
+use mytheclipse_event::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

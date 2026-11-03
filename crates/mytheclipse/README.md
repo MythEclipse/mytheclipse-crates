@@ -79,15 +79,24 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mytheclipse = { version = "4", features = ["full"] }
+mytheclipse = { version = "5", features = ["full"] }
 ```
+
+```rust
+use mytheclipse::prelude::*;
+```
+
+That single import carries the traits (`Pool`, `Reconnectable`,
+`ParallelConcurrency`) whose methods are otherwise not callable, plus the types
+and free functions below. Every section from here on assumes it.
 
 ### 1. Execution Primitives
 
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let ctx = mytheclipse::init();
+    // Optional: sizes the pools up front instead of on first use.
+    let _ctx = mytheclipse::init();
 
     // Async I/O (instrumented with tracing)
     let io = mytheclipse::spawn_io(async { 42 });
@@ -95,8 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Heavy Compute (isolated from worker panics)
     let sum = mytheclipse::compute(|| (1..=1_000_000u64).sum::<u64>())?;
 
-    // Background Queue (concurrency-bounded) — the await on spawn_bg itself
-    // waits for a free slot, so it is the backpressure point.
+    // Background Queue (concurrency-bounded). The first await waits for a free
+    // slot — that is the backpressure point — and yields a JoinHandle.
     let bg = mytheclipse::spawn_bg(async { /* task */ }).await;
 
     let _ = (io.await, bg.await);

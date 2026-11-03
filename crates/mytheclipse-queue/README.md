@@ -17,7 +17,7 @@ without touching `WorkerPool`.
 ## Usage
 
 ```rust
-use mytheclipse_queue::{InMemoryQueue, Job, JobFuture, JobHandler, Queue, WorkerPool};
+use mytheclipse_queue::prelude::*;
 
 fn print_handler() -> impl JobHandler {
     struct PrintHandler;
