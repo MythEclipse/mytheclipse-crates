@@ -33,11 +33,17 @@ impl std::fmt::Display for RateLimitError {
 
 impl std::error::Error for RateLimitError {}
 
+/// Token bucket state, guarded as one unit so `tokens` and `last_refill` can
+/// never be observed out of step with each other.
+struct Bucket {
+    tokens: f64,
+    last_refill: Instant,
+}
+
 struct Inner {
     capacity: u64,
     refill_per_sec: f64,
-    tokens: Mutex<f64>,
-    last_refill: Mutex<Instant>,
+    bucket: Mutex<Bucket>,
 }
 
 /// A thread-safe, async-compatible token-bucket rate limiter.
@@ -67,8 +73,10 @@ impl RateLimiter {
             inner: std::sync::Arc::new(Inner {
                 capacity: burst_capacity,
                 refill_per_sec: rate_per_sec,
-                tokens: Mutex::new(burst_capacity as f64),
-                last_refill: Mutex::new(Instant::now()),
+                bucket: Mutex::new(Bucket {
+                    tokens: burst_capacity as f64,
+                    last_refill: Instant::now(),
+                }),
             }),
         }
     }
@@ -95,13 +103,11 @@ impl RateLimiter {
     /// Returns `Err(RateLimitError::Limited)` (or the caller may map it to
     /// [`MytheclipseError::RateLimited`]) when the bucket is empty.
     pub fn try_acquire(&self) -> Result<(), RateLimitError> {
-        let mut tokens = self.inner.tokens.lock().unwrap();
-        let mut last = self.inner.last_refill.lock().unwrap();
-        self.refill(&mut tokens, *last);
-        *last = Instant::now();
+        let mut bucket = self.inner.bucket.lock().unwrap();
+        self.refill(&mut bucket);
 
-        if *tokens >= 1.0 {
-            *tokens -= 1.0;
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
             Ok(())
         } else {
             Err(RateLimitError::Limited)
@@ -111,16 +117,19 @@ impl RateLimiter {
     /// The approximate number of tokens currently available (including burst
     /// headroom), for metrics/observability purposes.
     pub fn available_tokens(&self) -> u64 {
-        let mut tokens = self.inner.tokens.lock().unwrap();
-        let last = self.inner.last_refill.lock().unwrap();
-        self.refill(&mut tokens, *last);
-        tokens.floor() as u64
+        let mut bucket = self.inner.bucket.lock().unwrap();
+        self.refill(&mut bucket);
+        bucket.tokens.floor() as u64
     }
 
-    fn refill(&self, tokens: &mut f64, last: Instant) {
-        let elapsed_secs = last.elapsed().as_secs_f64();
+    fn refill(&self, bucket: &mut Bucket) {
+        let now = Instant::now();
+        let elapsed_secs = now
+            .saturating_duration_since(bucket.last_refill)
+            .as_secs_f64();
         let added = elapsed_secs * self.inner.refill_per_sec;
-        *tokens = (*tokens + added).min(self.inner.capacity as f64);
+        bucket.tokens = (bucket.tokens + added).min(self.inner.capacity as f64);
+        bucket.last_refill = now;
     }
 
     /// `acquire` mapped onto the shared error type, e.g. for code returning
