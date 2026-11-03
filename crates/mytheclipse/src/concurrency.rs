@@ -6,6 +6,7 @@
 //! an image at once) without requiring a runtime. It is built on std's
 //! `Mutex` + `Condvar` and therefore works in plain, non-async threads.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::{Condvar, Mutex};
 
@@ -13,6 +14,14 @@ struct Inner {
     state: Mutex<usize>,
     available: Condvar,
     max: usize,
+    /// Threads parked in `available.wait`. Lets a release skip the condvar
+    /// entirely in the common uncontended case: signalling a condvar with no
+    /// waiters still takes its internal lock, which costs more than the rest of
+    /// the acquire/release pair put together.
+    ///
+    /// Updated under `state`, so a releaser holding `state` cannot observe zero
+    /// waiters while a thread is between "decided to wait" and "parked".
+    waiters: AtomicUsize,
 }
 
 /// A thread-safe cap on concurrent in-flight sections.
@@ -42,6 +51,7 @@ impl ConcurrencyLimiter {
                 state: Mutex::new(max_concurrent),
                 available: Condvar::new(),
                 max: max_concurrent,
+                waiters: AtomicUsize::new(0),
             }),
         }
     }
@@ -50,11 +60,15 @@ impl ConcurrencyLimiter {
     pub fn acquire(&self) -> ConcurrencyPermit {
         let mut available = self.inner.state.lock().unwrap();
         while *available == 0 {
+            // Counted while still holding the lock, so a concurrent release
+            // either sees this waiter or this thread sees the released slot.
+            self.inner.waiters.fetch_add(1, Ordering::SeqCst);
             available = self
                 .inner
                 .available
                 .wait(available)
                 .expect("concurrency limiter condvar poisoned");
+            self.inner.waiters.fetch_sub(1, Ordering::SeqCst);
         }
         *available -= 1;
         ConcurrencyPermit {
@@ -92,7 +106,9 @@ impl Drop for ConcurrencyPermit {
     fn drop(&mut self) {
         let mut available = self.inner.state.lock().unwrap();
         *available += 1;
-        self.inner.available.notify_one();
+        if self.inner.waiters.load(Ordering::SeqCst) > 0 {
+            self.inner.available.notify_one();
+        }
     }
 }
 
