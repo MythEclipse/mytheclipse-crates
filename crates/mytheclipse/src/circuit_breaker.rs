@@ -151,14 +151,23 @@ impl CircuitBreaker {
         match self.state() {
             CircuitState::Open => false,
             CircuitState::HalfOpen => {
-                let in_flight = self.inner.half_open_in_flight.load(Ordering::Acquire);
-                if in_flight < self.inner.config.half_open_max_calls {
-                    self.inner
-                        .half_open_in_flight
-                        .fetch_add(1, Ordering::AcqRel);
-                    true
-                } else {
-                    false
+                // Reserve a probe slot atomically: a load-then-add pair would
+                // let concurrent callers all observe a free slot and overshoot
+                // `half_open_max_calls`.
+                let mut in_flight = self.inner.half_open_in_flight.load(Ordering::Acquire);
+                loop {
+                    if in_flight >= self.inner.config.half_open_max_calls {
+                        return false;
+                    }
+                    match self.inner.half_open_in_flight.compare_exchange_weak(
+                        in_flight,
+                        in_flight + 1,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => return true,
+                        Err(actual) => in_flight = actual,
+                    }
                 }
             }
             CircuitState::Closed => true,
@@ -223,10 +232,29 @@ impl CircuitBreaker {
     fn record_result(&self, success: bool) {
         match self.inner.state.load(Ordering::Acquire) {
             HALF_OPEN => {
-                // A probe finished; release its slot regardless of outcome.
-                self.inner
-                    .half_open_in_flight
-                    .fetch_sub(1, Ordering::AcqRel);
+                // Release a probe slot only if this call actually reserved one.
+                // A call admitted while `Closed` can report back after the
+                // transition to `HalfOpen`; subtracting unconditionally there
+                // would wrap the counter and wedge the breaker permanently.
+                let mut in_flight = self.inner.half_open_in_flight.load(Ordering::Acquire);
+                let held_probe = loop {
+                    if in_flight == 0 {
+                        break false;
+                    }
+                    match self.inner.half_open_in_flight.compare_exchange_weak(
+                        in_flight,
+                        in_flight - 1,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => break true,
+                        Err(actual) => in_flight = actual,
+                    }
+                };
+                if !held_probe {
+                    // Not a probe: its outcome cannot decide the transition.
+                    return;
+                }
                 if success {
                     let successes = self.inner.successes.fetch_add(1, Ordering::AcqRel) + 1;
                     if successes >= self.inner.config.close_successes {
@@ -373,6 +401,60 @@ mod tests {
         assert_eq!(b.state(), CircuitState::Open);
         b.reset();
         assert_eq!(b.state(), CircuitState::Closed);
+    }
+
+    #[test]
+    fn half_open_admits_only_configured_probes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let b = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1,
+            open_timeout: Duration::from_millis(10),
+            half_open_max_calls: 2,
+            close_successes: 5,
+        });
+        b.record_failure();
+        assert!(b.is_open());
+        std::thread::sleep(Duration::from_millis(20));
+
+        let admitted = Arc::new(AtomicUsize::new(0));
+        let mut threads = Vec::new();
+        for _ in 0..8 {
+            let b = b.clone();
+            let admitted = Arc::clone(&admitted);
+            threads.push(std::thread::spawn(move || {
+                if b.allow_request() {
+                    admitted.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(admitted.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn stale_closed_call_does_not_wedge_half_open() {
+        let b = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1,
+            open_timeout: Duration::from_millis(10),
+            half_open_max_calls: 1,
+            close_successes: 1,
+        });
+        // Admitted while `Closed`, so it holds no probe slot.
+        assert!(b.allow_request());
+        b.record_failure();
+        assert!(b.is_open());
+        std::thread::sleep(Duration::from_millis(20));
+
+        // Its (late) failure lands while the breaker is half-open.
+        b.record_failure();
+        assert!(
+            b.allow_request(),
+            "a non-probe completion must not consume the probe budget"
+        );
     }
 
     #[test]
