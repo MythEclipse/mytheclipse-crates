@@ -1,3 +1,29 @@
+# [5.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.1.0...v5.0.0) (2026-11-03)
+
+
+* fix(queue)!: make the backpressure enforcer cap in-flight jobs ([2be1081](https://github.com/MythEclipse/mytheclipse-crates/commit/2be1081dd5ac1ffc6cef28452264dbf02155632e))
+* refactor(resiliency)!: share one fan-out loop between the parallel primitives ([01cc7d6](https://github.com/MythEclipse/mytheclipse-crates/commit/01cc7d68df5820c5a056bd081572007761dc006b))
+
+
+### Bug Fixes
+
+* **pool_health:** make acquire_healthy skip rejected items ([ae617de](https://github.com/MythEclipse/mytheclipse-crates/commit/ae617de38919eae641f09d546794f36928f2ff04))
+
+
+### BREAKING CHANGES
+
+* parallel_map_unordered returns results in completion order
+rather than input order. Callers that relied on it matching parallel_map must
+switch to parallel_map.
+* **pool_health:** acquire_healthy can now return PoolError::Exhausted when no
+item passes the validator, where it previously returned the first item
+regardless.
+* BackpressureEnforcer::inc_delivered is gone. It incremented the
+same counter try_enqueue already incremented, so calling it double-counted and
+handed the topic phantom capacity. BackpressureError gained an Enqueue variant,
+enqueue_with_backpressure propagates it, and inflight() now reports slots held
+rather than lifetime enqueues.
+
 # [4.1.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.0.1...v4.1.0) (2026-11-03)
 
 
