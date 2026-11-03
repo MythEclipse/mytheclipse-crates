@@ -1,3 +1,10 @@
+## [1.23.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.23.0...v1.23.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **ci:** restore the publish workflow indentation ([26de9c9](https://github.com/MythEclipse/mytheclipse-crates/commit/26de9c92357cf89d9a217f56972bb921579ec387))
+
 # [1.23.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.2...v1.23.0) (2026-11-03)
 
 
