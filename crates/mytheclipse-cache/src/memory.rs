@@ -1,8 +1,8 @@
 //! A simple, dependency-free in-process cache (L1, `l1-memory`).
 //!
-//! Backed by a `HashMap<String, (Vec<u8>, Instant)>` guarded by a `Mutex`.
-//! Entries are lazily expired on access by comparing against `Instant`; a
-//! monotonic clock keeps TTLs robust against wall-clock discontinuities.
+//! Backed by a `HashMap<String, Entry>` guarded by a single `Mutex`. Entries
+//! are lazily expired on access by comparing against `Instant`; a monotonic
+//! clock keeps TTLs robust against wall-clock discontinuities.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -12,8 +12,61 @@ use async_trait::async_trait;
 
 use crate::traits::{Cache, CacheError};
 
-/// A wrapping entry: `None` expiry means the value never expires.
-type Entry = (Vec<u8>, Option<Instant>);
+/// A stored value with its optional expiry and its insertion sequence number.
+#[derive(Debug)]
+struct Entry {
+    value: Vec<u8>,
+    /// `None` means the value never expires.
+    expires: Option<Instant>,
+    /// Monotonic insert order, used to detect stale `order` slots.
+    seq: u64,
+}
+
+/// The cache's mutable state: the map and (when bounded) its insertion order
+/// live behind one lock, so they can never drift out of step.
+#[derive(Debug)]
+struct State {
+    map: HashMap<String, Entry>,
+    /// Insertion order as `(seq, key)`; only maintained when the cache is
+    /// bounded. A slot whose `seq` no longer matches the map entry is stale
+    /// (overwritten, invalidated or expired) and is skipped during eviction.
+    order: VecDeque<(u64, String)>,
+    next_seq: u64,
+}
+
+/// Compact the order queue once stale slots outnumber live ones, keeping it
+/// proportional to the number of live entries.
+const COMPACT_FACTOR: usize = 4;
+
+impl State {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            next_seq: 0,
+        }
+    }
+
+    /// Evicts oldest-first until the map is back within `cap`, then compacts
+    /// the order queue if it accumulated too many stale slots.
+    fn evict_down_to(&mut self, cap: usize) {
+        while self.map.len() > cap {
+            match self.order.pop_front() {
+                // Only remove when this slot is the key's live insertion.
+                Some((seq, key)) => {
+                    if self.map.get(&key).is_some_and(|entry| entry.seq == seq) {
+                        self.map.remove(&key);
+                    }
+                }
+                None => return,
+            }
+        }
+        if self.order.len() > cap.saturating_mul(COMPACT_FACTOR) {
+            let Self { map, order, .. } = self;
+            order.retain(|(seq, key)| map.get(key).is_some_and(|entry| entry.seq == *seq));
+        }
+    }
+}
 
 /// An in-process [`Cache`] for L1 caching.
 ///
@@ -23,20 +76,17 @@ type Entry = (Vec<u8>, Option<Instant>);
 /// (least-recently-inserted) entry is evicted.
 #[derive(Debug, Clone)]
 pub struct MemoryCache {
-    inner: Arc<Mutex<HashMap<String, Entry>>>,
+    state: Arc<Mutex<State>>,
     /// When `Some(n)`, the cache refuses more than `n` live entries and evicts
     /// the oldest on overflow. `None` = unbounded (legacy default).
     max_entries: Option<usize>,
-    /// Insertion order, for eviction when `max_entries` is set.
-    order: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl Default for MemoryCache {
     fn default() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
+            state: Arc::new(Mutex::new(State::new())),
             max_entries: None,
-            order: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 }
@@ -49,7 +99,7 @@ impl MemoryCache {
 
     /// Pre-allocates space for `capacity` entries to reduce reallocation.
     pub fn with_capacity(self, capacity: usize) -> Self {
-        self.inner.lock().unwrap().reserve(capacity);
+        self.state.lock().unwrap().map.reserve(capacity);
         self
     }
 
@@ -74,16 +124,17 @@ impl MemoryCache {
 #[async_trait]
 impl Cache for MemoryCache {
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError> {
-        let mut map = self.inner.lock().unwrap();
-        match map.get(key) {
-            Some((value, Some(expires))) if *expires <= Instant::now() => {
-                map.remove(key);
-                self.remove_order(key);
-                Ok(None)
-            }
-            Some((value, _)) => Ok(Some(value.clone())),
-            None => Ok(None),
+        let mut state = self.state.lock().unwrap();
+        let now = Instant::now();
+        let expired = state
+            .map
+            .get(key)
+            .is_some_and(|entry| entry.expires.is_some_and(|at| at <= now));
+        if expired {
+            state.map.remove(key);
+            return Ok(None);
         }
+        Ok(state.map.get(key).map(|entry| entry.value.clone()))
     }
 
     async fn set(
@@ -93,41 +144,37 @@ impl Cache for MemoryCache {
         ttl: Option<Duration>,
     ) -> Result<(), CacheError> {
         let expires = ttl.map(|d| Instant::now() + d);
-        let mut map = self.inner.lock().unwrap();
-        let is_new = !map.contains_key(key);
-        map.insert(key.to_string(), (value, expires));
-        if is_new {
-            let mut order = self.order.lock().unwrap();
-            order.push_back(key.to_string());
-            if let Some(cap) = self.max_entries {
-                while order.len() > cap {
-                    if let Some(oldest) = order.pop_front() {
-                        map.remove(&oldest);
-                    }
-                }
-            }
+        let mut state = self.state.lock().unwrap();
+        let seq = state.next_seq;
+        state.next_seq += 1;
+        state.map.insert(
+            key.to_string(),
+            Entry {
+                value,
+                expires,
+                seq,
+            },
+        );
+        // Only bounded caches need an eviction order at all: tracking it on an
+        // unbounded cache would just duplicate every key forever.
+        if let Some(cap) = self.max_entries {
+            state.order.push_back((seq, key.to_string()));
+            state.evict_down_to(cap);
         }
         Ok(())
     }
 
     async fn invalidate(&self, key: &str) -> Result<(), CacheError> {
-        self.inner.lock().unwrap().remove(key);
-        self.remove_order(key);
+        // O(1): the key's order slot becomes stale and is skipped on eviction.
+        self.state.lock().unwrap().map.remove(key);
         Ok(())
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        self.inner.lock().unwrap().clear();
-        self.order.lock().unwrap().clear();
+        let mut state = self.state.lock().unwrap();
+        state.map.clear();
+        state.order.clear();
         Ok(())
-    }
-}
-
-impl MemoryCache {
-    /// Removes `key` from the insertion-order deque (if present).
-    fn remove_order(&self, key: &str) {
-        let mut order = self.order.lock().unwrap();
-        order.retain(|k| k != key);
     }
 }
 
@@ -234,6 +281,35 @@ mod tests {
         assert_eq!(c.get("a").await.unwrap(), None);
         assert_eq!(c.get("b").await.unwrap(), Some(b"2".to_vec()));
         assert_eq!(c.get("c").await.unwrap(), Some(b"3".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn bounded_cache_keeps_cap_under_hot_overwrites() {
+        let c = MemoryCache::new().with_max_entries(2);
+        for i in 0..100 {
+            c.set("hot", format!("v{i}").into_bytes(), None)
+                .await
+                .unwrap();
+        }
+        c.set("other", b"o".to_vec(), None).await.unwrap();
+        c.set("third", b"t".to_vec(), None).await.unwrap();
+
+        let state = c.state.lock().unwrap();
+        assert_eq!(state.map.len(), 2);
+        assert!(state.order.len() <= 2 * COMPACT_FACTOR);
+        // "hot" holds the oldest live insertion, so it is the evicted one.
+        assert!(!state.map.contains_key("hot"));
+        assert!(state.map.contains_key("other"));
+        assert!(state.map.contains_key("third"));
+    }
+
+    #[tokio::test]
+    async fn unbounded_cache_does_not_track_order() {
+        let c = MemoryCache::new();
+        for i in 0..10 {
+            c.set(&format!("k{i}"), b"v".to_vec(), None).await.unwrap();
+        }
+        assert!(c.state.lock().unwrap().order.is_empty());
     }
 
     #[cfg(feature = "cache-aside")]
