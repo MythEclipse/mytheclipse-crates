@@ -3,9 +3,13 @@
 //!
 //! Suitable for communication between components inside a single process
 //! (monolith). Each topic lazily gets its own broadcast channel on first use.
+//!
+//! The topic map is guarded by an `RwLock`: publishing takes it shared and
+//! clones the channel sender out, so concurrent producers do not serialize on
+//! one exclusive lock and the steady-state path allocates nothing.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use tokio::sync::broadcast;
@@ -18,7 +22,7 @@ const DEFAULT_CAPACITY: usize = 256;
 /// topic.
 #[derive(Clone)]
 pub struct InMemoryEventBus {
-    channels: Arc<Mutex<HashMap<String, broadcast::Sender<Vec<u8>>>>>,
+    channels: Arc<RwLock<HashMap<String, broadcast::Sender<Vec<u8>>>>>,
     capacity: usize,
 }
 
@@ -33,15 +37,21 @@ impl InMemoryEventBus {
     /// for slow subscribers before older ones are dropped (lagged).
     pub fn new(capacity: usize) -> Self {
         Self {
-            channels: Arc::new(Mutex::new(HashMap::new())),
+            channels: Arc::new(RwLock::new(HashMap::new())),
             capacity,
         }
     }
 
+    /// The sender for `topic`, creating its channel on first use. Existing
+    /// topics are served from the read lock without allocating a key.
     fn sender_for(&self, topic: &str) -> broadcast::Sender<Vec<u8>> {
-        let mut channels = self.channels.lock().unwrap();
+        let existing = self.channels.read().unwrap().get(topic).cloned();
+        if let Some(tx) = existing {
+            return tx;
+        }
+        let mut channels = self.channels.write().unwrap();
         channels
-            .entry(topic.to_string())
+            .entry(topic.to_owned())
             .or_insert_with(|| broadcast::channel(self.capacity).0)
             .clone()
     }
@@ -50,7 +60,7 @@ impl InMemoryEventBus {
     /// topic has never been touched or has no active subscribers).
     pub fn subscriber_count(&self, topic: &str) -> usize {
         self.channels
-            .lock()
+            .read()
             .unwrap()
             .get(topic)
             .map(|tx| tx.receiver_count())
