@@ -12,12 +12,12 @@ context alongside self-contained, constructible utilities.
 
 ## Resource Sizing
 
-Given `N` logical cores (`num_cpus::get()`):
+Given `N` logical cores (`std::thread::available_parallelism()`):
 
 | Subsystem | Sizing | On 8 cores | Backing primitive |
 | :--- | :--- | :--- | :--- |
 | **Async I/O** | `N` | 8 | Ambient `tokio::spawn` + `tracing` span |
-| **Compute** | `max(1, N - 1)` | 7 | Sized `rayon::ThreadPool` + `catch_unwind` |
+| **Compute** | `max(1, N - 1)` | 7 | `std::thread::scope` workers + `catch_unwind` |
 | **Background Queue** | `max(2, N / 2)` | 4 | `tokio::sync::Semaphore` + `tokio::spawn` |
 
 The three execution primitives (`io`, `compute`, `bg`) are sized from the host's
