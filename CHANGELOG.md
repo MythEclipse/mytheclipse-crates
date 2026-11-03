@@ -1,3 +1,18 @@
+# [3.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v2.0.0...v3.0.0) (2026-11-03)
+
+
+* feat(cache)!: make the json typed cache opt-in ([e019e39](https://github.com/MythEclipse/mytheclipse-crates/commit/e019e3961acad0d681a790d09250bdbec3d6f551))
+* feat(event)!: make the json typed bus opt-in ([1bd33c6](https://github.com/MythEclipse/mytheclipse-crates/commit/1bd33c6336428ca693eb753ffaadd7c3d854ceb9))
+
+
+### BREAKING CHANGES
+
+* TypedEventBus, TypedSubscription and the Event marker trait now
+require features = ["typed"]. They are no longer exported under the default
+feature set.
+* TypedCache now requires features = ["typed"]. It is no longer
+re-exported under the default feature set.
+
 # [2.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.23.1...v2.0.0) (2026-11-03)
 
 
