@@ -5,17 +5,14 @@ transport. Provides a single `Queue` trait, `Job` type, and `WorkerPool` executo
 with configurable retry/backoff, concurrency, and a dead-letter queue.
 
 Today there is **one backend: in-memory** (`tokio::sync::mpsc` + task spawning,
-no external service). The `redis`, `nats`, and `postgres` features exist in
-`Cargo.toml` but **no backend implementation ships yet** — do not rely on them.
+no external service). `Queue` is a trait, so another transport can implement it
+without touching `WorkerPool`.
 
 ## Features
 
-| Feature | Default | Backend | Status |
-| :--- | :---: | :--- | :--- |
-| `in-memory` | yes | `tokio::sync` | Implemented: `InMemoryQueue`. |
-| `redis` | no | `redis` crate | Declared, no implementation yet. |
-| `nats` | no | `async-nats` | Declared, no implementation yet. |
-| `postgres` | no | `tokio-postgres` | Declared, no implementation yet. |
+| Feature | Default | Backend |
+| :--- | :---: | :--- |
+| `in-memory` | yes | `tokio::sync` — `InMemoryQueue`. |
 
 ## Usage
 

@@ -8,30 +8,20 @@ repository = "https://github.com/asepharyana/mytheclipse"
 homepage = "https://github.com/asepharyana/mytheclipse"
 documentation = "https://docs.rs/mytheclipse-queue"
 authors = ["asepharyana <superaseph@gmail.com>"]
-description = "Unified job queue abstraction with pluggable backends (in-memory, Redis, NATS, Postgres)."
+description = "Job queue abstraction with an in-memory backend, WorkerPool executor, retry/backoff and dead-letter queue."
 readme = "README.md"
-keywords = ["queue", "job-queue", "background-jobs", "redis", "nats"]
+keywords = ["queue", "job-queue", "background-jobs", "worker-pool", "tokio"]
 categories = ["asynchronous", "network-programming"]
 
 [features]
 default = ["in-memory"]
 # In-process scheduler using tokio mpsc + task spawning.
 in-memory = ["dep:tokio"]
-# Redis-backed distributed queue.
-redis = ["dep:redis"]
-# NATS JetStream-backed distributed queue.
-nats = ["dep:async-nats", "dep:bytes"]
-# PostgreSQL-backed queue using SKIP LOCKED.
-postgres = ["dep:tokio-postgres"]
 
 [dependencies]
 tracing = "0.1"
 async-trait = "0.1"
 tokio = { version = "1.53", features = ["sync", "time", "rt", "macros"], optional = true }
-redis = { version = "0.27", default-features = false, features = ["tokio-comp"], optional = true }
-async-nats = { version = "0.38", optional = true }
-bytes = { version = "1", optional = true }
-tokio-postgres = { version = "0.7", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

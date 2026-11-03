@@ -1,14 +1,13 @@
 //! # mytheclipse-queue
 //!
-//! A unified job queue abstraction so your background work isn't locked to one
+//! A job queue abstraction so your background work isn't locked to one
 //! transport. Provides a single [`Queue`] trait, [`Job`] type, and `WorkerPool`
 //! executor with configurable retry/backoff, concurrency, and a dead-letter
 //! queue.
 //!
-//! The in-memory backend (`InMemoryQueue`, feature `in-memory`) is the one that
-//! exists today: `tokio::sync::mpsc` plus task spawning, no external service.
-//! The `redis`, `nats`, and `postgres` features are declared but have no backend
-//! implementation yet — see the README.
+//! The backend that ships is in-memory (`InMemoryQueue`, feature `in-memory`):
+//! `tokio::sync::mpsc` plus task spawning, no external service. `Queue` is a
+//! trait, so another transport can implement it without touching `WorkerPool`.
 
 pub mod error;
 #[cfg(feature = "in-memory")]
