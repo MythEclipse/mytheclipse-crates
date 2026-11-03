@@ -1,4 +1,25 @@
 //! JSON-typed convenience over the byte-oriented [`EventBus`].
+//!
+//! ```no_run
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Debug, Serialize, Deserialize, PartialEq)]
+//! struct OrderCreated { id: u64 }
+//!
+//! #[cfg(feature = "mem")]
+//! #[tokio::main]
+//! async fn main() {
+//!     use mytheclipse_event::{InMemoryEventBus, TypedEventBus};
+//!     let bus = TypedEventBus::new(InMemoryEventBus::default());
+//!     let mut sub = bus.subscribe::<OrderCreated>("orders").await.unwrap();
+//!     bus.publish("orders", &OrderCreated { id: 42 }).await.unwrap();
+//!     let event = sub.recv().await.unwrap();
+//!     assert_eq!(event, OrderCreated { id: 42 });
+//! }
+//!
+//! #[cfg(not(feature = "mem"))]
+//! fn main() {}
+//! ```
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -66,7 +87,7 @@ impl<E: Event> TypedSubscription<E> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mem"))]
 mod tests {
     use super::*;
     use crate::memory::InMemoryEventBus;

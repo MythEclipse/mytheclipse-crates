@@ -13,6 +13,7 @@ service-to-service) communication isn't locked to one transport.
 ## Features
 
 - `mem` (default) — in-memory dispatcher.
+- `typed` — `TypedEventBus`, JSON publish/subscribe over any `EventBus` (adds `serde`).
 - `amqp` — RabbitMQ via `lapin` (pure Rust AMQP 0.9.1 client).
 - `nats` — NATS via `async-nats`.
 

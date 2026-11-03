@@ -17,6 +17,8 @@ categories = ["asynchronous", "network-programming"]
 default = ["mem"]
 # In-memory dispatcher (tokio broadcast channel), always cheap.
 mem = ["dep:tokio"]
+# JSON-typed publish/subscribe over any `EventBus` (`serde` + `serde_json`).
+typed = ["dep:serde", "dep:serde_json"]
 # Distributed broker backends.
 amqp = ["dep:lapin", "dep:futures-lite"]
 nats = ["dep:async-nats", "dep:futures-util", "dep:bytes"]
@@ -26,8 +28,8 @@ nats = ["dep:async-nats", "dep:futures-util", "dep:bytes"]
 # compiled) use it.
 async-trait = "0.1"
 tokio = { version = "1.53", features = ["sync", "rt"], optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 # RabbitMQ (pure Rust AMQP 0.9.1 client).
 lapin = { version = "2", optional = true }

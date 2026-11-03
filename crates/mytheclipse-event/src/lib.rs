@@ -15,23 +15,19 @@
 //!
 //! ## Example
 //!
-//! The in-memory + typed bus (`mem` feature, on by default):
+//! The in-memory bus (`mem` feature, on by default) carries raw bytes; the
+//! `typed` feature adds JSON (de)serialization on top of it.
 //!
 //! ```no_run
-//! use serde::{Deserialize, Serialize};
-//!
-//! #[derive(Debug, Serialize, Deserialize, PartialEq)]
-//! struct OrderCreated { id: u64 }
-//!
 //! #[cfg(feature = "mem")]
 //! #[tokio::main]
 //! async fn main() {
-//!     use mytheclipse_event::{EventBus, InMemoryEventBus, TypedEventBus};
-//!     let bus = TypedEventBus::new(InMemoryEventBus::default());
-//!     let mut sub = bus.subscribe::<OrderCreated>("orders").await.unwrap();
-//!     bus.publish("orders", &OrderCreated { id: 42 }).await.unwrap();
-//!     let event = sub.recv().await.unwrap();
-//!     assert_eq!(event, OrderCreated { id: 42 });
+//!     use mytheclipse_event::{EventBus, InMemoryEventBus};
+//!     let bus = InMemoryEventBus::default();
+//!     let mut sub = bus.subscribe("orders").await.unwrap();
+//!     bus.publish("orders", b"{\"id\":42}".to_vec()).await.unwrap();
+//!     let payload = sub.recv().await.unwrap();
+//!     assert_eq!(payload, b"{\"id\":42}");
 //! }
 //!
 //! #[cfg(not(feature = "mem"))]
@@ -43,7 +39,7 @@ pub mod traits;
 #[cfg(feature = "mem")]
 pub mod memory;
 
-#[cfg(feature = "mem")]
+#[cfg(feature = "typed")]
 pub mod typed;
 
 #[cfg(feature = "amqp")]
@@ -57,7 +53,7 @@ pub use traits::{EventBus, EventError, Subscription};
 #[cfg(feature = "mem")]
 pub use memory::InMemoryEventBus;
 
-#[cfg(feature = "mem")]
+#[cfg(feature = "typed")]
 pub use typed::{Event, TypedEventBus, TypedSubscription};
 
 #[cfg(feature = "amqp")]
