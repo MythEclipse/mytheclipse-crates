@@ -118,38 +118,115 @@ impl CronSchedule {
     /// Returns the next fire time strictly after `from`, or `None` if the
     /// expression cannot fire within the scan horizon (e.g. Feb 30).
     ///
-    /// Jumps to the next month when the month is excluded, to the next day when
-    /// only the day is, and to the next hour when only the hour is, so cost
-    /// scales with the calendar distance to the match rather than with minutes.
+    /// Each field is *jumped* to its next allowed value rather than stepped
+    /// through: a binary search over the sorted allowed set lands directly on
+    /// the next matching month, day, hour or minute. Cost therefore scales with
+    /// the number of calendar fields that have to be skipped, not with the
+    /// number of minutes between `from` and the answer.
     pub fn next_after(&self, from: CronTime) -> Option<CronTime> {
         let horizon = 5 * 366 * 24 * 60; // minutes in ~5 years
         let mut spent = 0u32;
         // Scan whole minutes (second = 0), starting strictly after `from`.
         let mut act = from.advance_minute();
+
         while spent < horizon {
-            if !self.date_matches(act) {
-                act = if self.months.contains(&(act.month as u8)) {
-                    act.next_day_start()
-                } else {
-                    act.next_month_start()
-                };
+            if !self.months.contains(&(act.month as u8)) {
+                act = self.next_matching_month(act);
                 spent += 24 * 60;
-            } else if !self.hours.contains(&(act.hour as u8)) {
-                act = act.next_hour_start();
-                spent += 60;
-            } else if self.minutes.contains(&(act.minute as u8)) {
-                return Some(act);
-            } else {
-                act = act.advance_minute();
-                spent += 1;
+                continue;
+            }
+            if !self.day_matches(act) {
+                act = self.next_matching_day(act);
+                spent += 24 * 60;
+                continue;
+            }
+            match next_at_or_after(&self.hours, act.hour as u8) {
+                Some(hour) => {
+                    if hour as u32 != act.hour {
+                        act = CronTime {
+                            hour: hour as u32,
+                            minute: 0,
+                            second: 0,
+                            ..act
+                        };
+                    }
+                }
+                None => {
+                    act = act.next_day_start();
+                    spent += 24 * 60;
+                    continue;
+                }
+            }
+            match next_at_or_after(&self.minutes, act.minute as u8) {
+                Some(minute) => {
+                    return Some(CronTime {
+                        minute: minute as u32,
+                        second: 0,
+                        ..act
+                    })
+                }
+                None => {
+                    act = act.next_hour_start();
+                    spent += 60;
+                }
             }
         }
         None
     }
 
-    /// Whether the month/day part of `t` can match at all.
-    fn date_matches(&self, t: CronTime) -> bool {
-        let month_ok = self.months.contains(&(t.month as u8));
+    /// The first instant of the next month this schedule allows, at or after
+    /// `act`'s month.
+    fn next_matching_month(&self, act: CronTime) -> CronTime {
+        let month = match next_at_or_after(&self.months, act.month as u8) {
+            Some(month) => month as u32,
+            // No allowed month left this year: wrap to the earliest allowed one.
+            None => self.months[0] as u32,
+        };
+        let year = if month <= act.month {
+            act.year + 1
+        } else {
+            act.year
+        };
+        CronTime {
+            year,
+            month,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
+        }
+    }
+
+    /// The first day this schedule allows at or after `act`'s day.
+    ///
+    /// Only the day-of-month-only case can be jumped: when day-of-week is also
+    /// restricted the two are OR-ed, so the next matching day is not a function
+    /// of the day-of-month set alone and the caller steps day by day instead.
+    fn next_matching_day(&self, act: CronTime) -> CronTime {
+        let dom_restricted = self.days_of_month.len() < 31;
+        let dow_restricted = self.days_of_week.len() < 7;
+
+        if dom_restricted && !dow_restricted {
+            let limit = days_in_month(act.year, act.month) as u8;
+            if let Some(day) = next_at_or_after(&self.days_of_month, act.day as u8) {
+                if day <= limit {
+                    return CronTime {
+                        day: day as u32,
+                        hour: 0,
+                        minute: 0,
+                        second: 0,
+                        ..act
+                    };
+                }
+            }
+            return act.next_month_start();
+        }
+
+        act.next_day_start()
+    }
+
+    /// Whether the day-of-month / day-of-week pair matches at `t`.
+    fn day_matches(&self, t: CronTime) -> bool {
         let dom_ok = self.days_of_month.contains(&(t.day as u8));
         let dow_ok = self.days_of_week.contains(&(weekday(t) as u8));
         // Standard cron: if both dom and dow are restricted, a match on EITHER
@@ -157,13 +234,12 @@ impl CronSchedule {
         // always true.
         let dom_restricted = self.days_of_month.len() < 31;
         let dow_restricted = self.days_of_week.len() < 7;
-        let day_ok = match (dom_restricted, dow_restricted) {
+        match (dom_restricted, dow_restricted) {
             (true, true) => dom_ok || dow_ok,
             (true, false) => dom_ok,
             (false, true) => dow_ok,
             (false, false) => true,
-        };
-        month_ok && day_ok
+        }
     }
 
     /// The next several fire times, for display/tests.
@@ -274,6 +350,30 @@ impl CronTime {
         let ts = self.to_timestamp() + secs;
         from_timestamp(ts)
     }
+}
+
+/// The first value in `sorted` that is `>= value`.
+///
+/// The parsed field sets are sorted and deduplicated, so this is a binary
+/// search: jumping to the next allowed hour costs the same whether the set has
+/// one entry or sixty.
+fn next_at_or_after(sorted: &[u8], value: u8) -> Option<u8> {
+    sorted.get(sorted.partition_point(|&v| v < value)).copied()
+}
+
+/// Length of `month` in `year`, in days.
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 /// Weekday: 0 = Sunday .. 6 = Saturday (matches cron).
@@ -533,6 +633,48 @@ mod tests {
         let s = CronSchedule::parse("30 4 * * *").unwrap();
         let next = s.next_after(t(2026, 8, 28, 0, 1)).unwrap();
         assert_eq!(next, t(2026, 8, 28, 4, 30));
+    }
+
+    #[test]
+    fn day_of_month_jump_skips_a_month_that_is_too_short() {
+        // Feb has no 31st, so the day jump has to give up on February and let
+        // the month step carry it to March.
+        let s = CronSchedule::parse("0 0 31 * *").unwrap();
+        let next = s.next_after(t(2027, 2, 1, 0, 0)).unwrap();
+        assert_eq!(next, t(2027, 3, 31, 0, 0));
+    }
+
+    #[test]
+    fn day_of_month_jump_lands_within_the_same_month() {
+        let s = CronSchedule::parse("0 0 15 * *").unwrap();
+        let next = s.next_after(t(2027, 2, 3, 8, 0)).unwrap();
+        assert_eq!(next, t(2027, 2, 15, 0, 0));
+    }
+
+    #[test]
+    fn restricted_day_of_month_or_day_of_week_still_matches_either() {
+        // Both fields restricted: the earlier of "the 1st" and "the next Monday"
+        // wins, which the day-of-month jump alone cannot decide.
+        let s = CronSchedule::parse("0 0 1 * MON").unwrap();
+        // 2027-02-03 is a Wednesday; the next Monday is the 8th, before the 1st.
+        let next = s.next_after(t(2027, 2, 3, 0, 0)).unwrap();
+        assert_eq!(next, t(2027, 2, 8, 0, 0));
+    }
+
+    #[test]
+    fn minute_jump_rolls_over_to_the_next_hour() {
+        // 10:30 already passed at 10:45, so the answer is tomorrow.
+        let s = CronSchedule::parse("30 10 * * *").unwrap();
+        let next = s.next_after(t(2027, 2, 3, 10, 45)).unwrap();
+        assert_eq!(next, t(2027, 2, 4, 10, 30));
+    }
+
+    #[test]
+    fn hour_jump_rolls_over_to_the_next_day() {
+        // The only allowed hour has already passed today.
+        let s = CronSchedule::parse("0 4 * * *").unwrap();
+        let next = s.next_after(t(2027, 2, 3, 10, 45)).unwrap();
+        assert_eq!(next, t(2027, 2, 4, 4, 0));
     }
 
     #[test]
