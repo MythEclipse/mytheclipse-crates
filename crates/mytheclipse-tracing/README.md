@@ -8,17 +8,17 @@ export.
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `env` | yes | `tracing-subscriber` with `EnvFilter` support. |
-| `otel` | no | OpenTelemetry OTLP gRPC exporter. |
-| `jaeger` | no | Jaeger thrift over `tracing-flame`. |
-| `zipkin` | no | Zipkin exporter (stub — extend as needed). |
+| `env` | yes | Real: `TracingLayer` — `tracing-subscriber` fmt subscriber with `EnvFilter`. |
+| `otel` | no | Stub: `OtelLayer` stores an OTLP endpoint string; no exporter is wired. |
+| `jaeger` | no | Placeholder: exposes the same `OtelLayer`; nothing Jaeger-specific. |
+| `zipkin` | no | Placeholder: pulls `tracing-subscriber` only, no exporter code. |
 | `full` | — | Enables `otel` + `jaeger`. |
 
 ## Usage
 
 ```toml
 [dependencies]
-mytheclipse-tracing = "0.2"
+mytheclipse-tracing = "1"
 ```
 
 ### Basic subscriber
@@ -34,17 +34,19 @@ fn main() {
 
 ### With OTLP export
 
+> `otel` currently provides the `OtelLayer` type and endpoint builder only; no
+> OTLP exporter is wired up yet.
+
 ```toml
 [dependencies]
-mytheclipse-tracing = { version = "0.2", features = ["otel"] }
+mytheclipse-tracing = { version = "1", features = ["otel"] }
 ```
 
 ```rust
-use mytheclipse_tracing::TracingLayer;
+use mytheclipse_tracing::OtelLayer;
 
 fn main() {
-    TracingLayer::install();
-    // OTLP exporter defaults to http://localhost:4317
-    tracing::info!("span data sent to OTLP collector");
+    let layer = OtelLayer::new("http://localhost:4317");
+    println!("configured OTLP endpoint: {}", layer.endpoint());
 }
 ```

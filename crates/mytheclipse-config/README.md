@@ -9,12 +9,16 @@ taking priority, and optionally hot-reload when the source files change.
 - `env` (default) — `.env` file loading via `dotenvy`.
 - `yaml` / `toml` (default) — structured file parsing (`.json` is always available).
 - `hot-reload` (default) — watch files and swap in a freshly reloaded value.
+- `validation` (default) — validation traits and built-in validators.
+- `schema` — JSON Schema generation for config docs and validation.
 
 ## Usage
 
 ```rust
-use serde::Deserialize;
+use std::path::Path;
+
 use mytheclipse_config::ConfigLoader;
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 struct AppConfig {
@@ -23,7 +27,7 @@ struct AppConfig {
 }
 
 let config: AppConfig = ConfigLoader::new()
-    .merge_file("config.yaml".as_ref())?
+    .merge_file(Path::new("config.yaml"))?
     .merge_env("APP")   // APP_PORT, APP_DATABASE_URL override the file
     .build()?;
 ```
@@ -31,19 +35,28 @@ let config: AppConfig = ConfigLoader::new()
 ### Hot-reload
 
 ```rust
+use std::path::Path;
+
 use mytheclipse_config::DynamicConfig;
-# use serde::Deserialize;
-# #[derive(Debug, Deserialize, Clone)] struct AppConfig { port: u16 }
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, Clone)]
+struct AppConfig { port: u16 }
 
 let cfg = DynamicConfig::<AppConfig>::watch_files(
     vec!["config.yaml".into()],
-    || mytheclipse_config::ConfigLoader::new().merge_file("config.yaml".as_ref())?.build(),
+    || {
+        ConfigLoader::new()
+            .merge_file(Path::new("config.yaml"))?
+            .build()
+    },
 )?;
 
 let mut changes = cfg.subscribe();
+let live = cfg.clone();
 tokio::spawn(async move {
     while changes.recv().await.is_ok() {
-        println!("config reloaded: {:?}", cfg.get());
+        println!("config reloaded: {:?}", live.get());
     }
 });
 ```

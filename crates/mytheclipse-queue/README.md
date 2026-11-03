@@ -2,25 +2,20 @@
 
 A unified job queue abstraction so your background work isn't locked to one
 transport. Provides a single `Queue` trait, `Job` type, and `WorkerPool` executor
-with configurable retry/backoff, concurrency, and a dead-letter queue — behind
-pluggable backends:
+with configurable retry/backoff, concurrency, and a dead-letter queue.
 
-- **In-memory** (default) — `tokio::sync::mpsc` + task spawning, no external service.
-- **Redis** (`redis`) — LIST-based queue with atomic moves.
-- **NATS JetStream** (`nats`) — durable consumer with ACK/NACK.
-- **PostgreSQL** (`postgres`) — `SKIP LOCKED` polling.
-
-All backends share the same `WorkerPool` driver; swapping is a one-line change
-at construction time.
+Today there is **one backend: in-memory** (`tokio::sync::mpsc` + task spawning,
+no external service). The `redis`, `nats`, and `postgres` features exist in
+`Cargo.toml` but **no backend implementation ships yet** — do not rely on them.
 
 ## Features
 
-| Feature | Default | Backend | Description |
+| Feature | Default | Backend | Status |
 | :--- | :---: | :--- | :--- |
-| `in-memory` | yes | `tokio::sync` | In-process queue, no external deps. |
-| `redis` | no | `redis` crate (fred) | Redis/Valkey list-based queue. |
-| `nats` | no | `async-nats` | NATS JetStream durable consumer. |
-| `postgres` | no | `tokio-postgres` | PostgreSQL `SKIP LOCKED` queue. |
+| `in-memory` | yes | `tokio::sync` | Implemented: `InMemoryQueue`. |
+| `redis` | no | `redis` crate | Declared, no implementation yet. |
+| `nats` | no | `async-nats` | Declared, no implementation yet. |
+| `postgres` | no | `tokio-postgres` | Declared, no implementation yet. |
 
 ## Usage
 
@@ -52,6 +47,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Swap `InMemoryQueue::new()` for `RedisQueue::connect("redis://127.0.0.1")` (with
-the `redis` feature) or `NatsQueue::connect("nats://127.0.0.1")` (with the `nats`
-feature) to move to a distributed broker without touching handler code.
+Any future backend only has to implement `Queue`; the `WorkerPool` driver is
+already generic over it, so swapping is a one-line change at construction time.

@@ -10,12 +10,17 @@ Safe, one-line security helpers that are easy to get wrong when hand-rolled:
 
 ## Features
 
-- `password` (default) — Argon2id hashing.
-- `encryption` (default) — AES-256-GCM.
-- `tokens` (default) — JSON Web Tokens.
+| Feature | Default | Provides |
+| :--- | :---: | :--- |
+| `password` | yes | Argon2id hashing and verification (`PasswordHasher`). |
+| `encryption` | yes | AES-256-GCM authenticated encryption (`Encryptor`). |
+| `tokens` | yes | JWT HS256 signing and validation (`TokenSigner`). Implies `encryption`. |
+| `derivation` | no | HKDF-SHA256 key derivation (`HkdfKeyDeriver`). |
+| `paseto` | no | **Not implemented — do not use.** `PasetoSigner` emits an unauthenticated base64 envelope, so any token can be forged. |
+| `rate-limit` | no | Declared, no implementation yet. |
 
-Zero features enabled by default? No — all three are on, but each is cheap and
-independent.
+The three default features are independent and cheap; disable them if you only
+need the key-management types.
 
 ## Usage
 

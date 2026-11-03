@@ -13,11 +13,14 @@ CLI framework for mytheclipse applications with built-in subcommands:
 
 ```toml
 [dependencies]
-mytheclipse-cli = "0.2"
+mytheclipse-cli = { git = "https://github.com/MythEclipse/mytheclipse-crates", package = "mytheclipse-cli" }
 ```
 
+The crate lives in the workspace but is **not published to crates.io yet**, so
+there is no version to depend on — use a path or git dependency.
+
 ```rust
-use mytheclipse_cli::CliApp;
+use mytheclipse_cli::{CliApp, Subcommand};
 
 fn main() {
     let app = CliApp::parse();
@@ -30,3 +33,7 @@ fn main() {
     }
 }
 ```
+
+`CliApp` derives `clap::Parser`, so `CliApp::parse()` reads `std::env::args`.
+Use `CliBuilder::new(name, about).build()` when you need to override the
+program name and about text at runtime.
