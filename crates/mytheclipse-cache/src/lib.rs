@@ -68,6 +68,9 @@ pub use traits::{Cache, CacheError};
 #[cfg(feature = "l1-memory")]
 pub use memory::MemoryCache;
 
+#[cfg(feature = "typed")]
+pub use memory::typed::TypedCache;
+
 #[cfg(feature = "l2-redis")]
 pub use redis::RedisCache;
 
