@@ -16,11 +16,8 @@ categories = ["asynchronous", "concurrency", "rust-patterns"]
 [dependencies]
 tokio = { version = "1.53", features = ["full"], optional = true }
 rayon = { version = "1.12", optional = true }
-rand = { version = "0.8", optional = true }
-num_cpus = "1.17"
 tracing = "0.1"
 async-trait = "0.1"
-thiserror = "2"
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
@@ -32,7 +29,7 @@ default = []
 io = ["dep:tokio"]
 compute = ["dep:rayon"]
 bg = ["dep:tokio"]
-resiliency = ["dep:tokio", "dep:rand"]
+resiliency = ["dep:tokio"]
 traffic = ["dep:tokio"]
 lifecycle = ["dep:tokio"]
 observability = ["dep:tokio", "lifecycle"]

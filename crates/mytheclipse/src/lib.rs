@@ -40,6 +40,8 @@ pub mod retry;
 #[cfg(feature = "resiliency")]
 pub mod retry_ext;
 #[cfg(feature = "resiliency")]
+pub mod simple_rng;
+#[cfg(feature = "resiliency")]
 pub use aggregate_error::AggregateError;
 #[cfg(feature = "resiliency")]
 pub use parallel_map::{

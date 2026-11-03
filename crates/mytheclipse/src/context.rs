@@ -2,7 +2,7 @@
 //!
 //! The context is initialized lazily on first access via [`context`], or
 //! explicitly via [`init`]. Resource sizing is derived from the number of
-//! logical CPU cores reported by [`num_cpus::get`].
+//! logical CPU cores reported by [`std::thread::available_parallelism`].
 
 use std::sync::OnceLock;
 
@@ -38,7 +38,12 @@ impl EngineContext {
     /// happens under an unrecoverable environment failure, such as the
     /// operating system refusing to spawn any new thread.
     fn build() -> Self {
-        let logical_cores = num_cpus::get();
+        // `available_parallelism` is the std answer to "how many threads should
+        // I start" (it respects cgroup/affinity limits); it only fails on
+        // platforms that cannot report a count, where 1 is the safe assumption.
+        let logical_cores = std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1);
         let io_threads = logical_cores;
         let compute_threads = logical_cores.saturating_sub(1).max(1);
         let bg_concurrency = (logical_cores / 2).max(2);

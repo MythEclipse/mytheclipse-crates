@@ -10,6 +10,9 @@ use std::time::Duration;
 use tracing::Instrument;
 
 #[cfg(feature = "resiliency")]
+use crate::simple_rng::random_rng;
+
+#[cfg(feature = "resiliency")]
 use crate::circuit_breaker::CircuitBreaker;
 #[cfg(feature = "traffic")]
 use crate::ratelimit::RateLimiter;
@@ -201,7 +204,7 @@ impl ServiceBuilder {
                                 let delay = crate::retry::backoff_delay(
                                     &cfg,
                                     attempt_no,
-                                    rand::thread_rng(),
+                                    &mut random_rng(),
                                 );
                                 tokio::time::sleep(delay).await;
                             }
@@ -214,7 +217,7 @@ impl ServiceBuilder {
                                 let delay = crate::retry::backoff_delay(
                                     &cfg,
                                     attempt_no,
-                                    rand::thread_rng(),
+                                    &mut random_rng(),
                                 );
                                 tokio::time::sleep(delay).await;
                             }

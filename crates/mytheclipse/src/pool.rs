@@ -11,12 +11,36 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 
 /// Errors returned by pool operations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum PoolError {
-    #[error("pool exhausted")]
+    /// The pool was closed, or no resource became available in time.
     Exhausted,
-    #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    /// A wrapped error from the pooled resource itself.
+    Other(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl std::fmt::Display for PoolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exhausted => f.write_str("pool exhausted"),
+            Self::Other(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for PoolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Other(e) => Some(e.as_ref()),
+            Self::Exhausted => None,
+        }
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync>> for PoolError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        Self::Other(e)
+    }
 }
 
 /// A pooled resource that releases the permit when dropped.

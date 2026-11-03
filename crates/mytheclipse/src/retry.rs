@@ -9,36 +9,25 @@
 use std::future::Future;
 use std::time::Duration;
 
-use rand::Rng;
 use tracing::Instrument;
 
+use crate::simple_rng::{random_rng, Rng};
+
 /// How much random jitter to apply to each backoff delay.
-///
-/// Jitter prevents the "thundering herd" of many retrying clients waking
-/// simultaneously; [`Full`](JitterKind::Full) is the most aggressive and is
-/// the recommended default for distributed systems.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JitterKind {
-    /// No randomness: sleep exactly the computed backoff.
     None,
-    /// Sleep in `[delay, 2 * delay)` — sometimes called "equal jitter".
     Equal,
-    /// Sleep in `[0, delay)` — "full jitter".
     Full,
 }
 
 /// Configuration driving [`retry`].
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
-    /// Total number of attempts (including the first). Must be `>= 1`.
     pub max_attempts: u32,
-    /// Initial delay before the first retry.
     pub base_delay: Duration,
-    /// Upper bound on the computed backoff delay.
     pub max_delay: Duration,
-    /// Exponential growth factor applied after each failure.
     pub factor: f64,
-    /// Jitter strategy applied to each delay.
     pub jitter: JitterKind,
 }
 
@@ -57,15 +46,10 @@ impl Default for RetryConfig {
 /// The error returned by [`retry`] once it gives up.
 #[derive(Debug)]
 pub enum RetryError<E> {
-    /// All attempts were made and the last one failed.
-    ///
-    /// `attempts` is the total number of attempts performed and `last` is the
-    /// error produced by the final attempt.
     Exhausted { attempts: u32, last: E },
 }
 
 impl<E> RetryError<E> {
-    /// Returns a reference to the error produced by the final attempt.
     pub fn last(&self) -> &E {
         match self {
             Self::Exhausted { last, .. } => last,
@@ -88,21 +72,11 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for RetryError<E>
 /// Statistics collected during a [`retry`] call.
 #[derive(Debug, Clone, Default)]
 pub struct RetryStats {
-    /// Total number of attempts made (including the first).
     pub attempts: u32,
-    /// Number of retries performed (= `attempts - 1` if exhausted, or
-    /// `attempts - 1` if ultimately succeeded after at least one retry).
     pub retries: u32,
-    /// The error message from the final attempt, if any.
     pub last_error: Option<String>,
 }
 
-/// Like [`retry`] but also returns [`RetryStats`] capturing attempt counts.
-///
-/// Retries `op` according to `config`, retrying only errors for which
-/// `filter` returns `true`.
-///
-/// Like [`retry`] but also returns [`RetryStats`].
 pub async fn retry_with_stats<T, E, F, Fut, P>(
     config: RetryConfig,
     filter: P,
@@ -127,12 +101,14 @@ where
 
         match result {
             Ok(value) => {
-                let stats = RetryStats {
-                    attempts: attempt,
-                    retries: attempt.saturating_sub(1),
-                    last_error,
-                };
-                return (Ok(value), stats);
+                return (
+                    Ok(value),
+                    RetryStats {
+                        attempts: attempt,
+                        retries: attempt.saturating_sub(1),
+                        last_error,
+                    },
+                );
             }
             Err(err) => {
                 last_error = Some(err.to_string());
@@ -151,25 +127,13 @@ where
                         stats,
                     );
                 }
-                let delay = backoff_delay(&config, attempt, rand::thread_rng());
+                let delay = backoff_delay(&config, attempt, &mut random_rng());
                 tokio::time::sleep(delay).await;
             }
         }
     }
 }
 
-/// Retries `op` according to `config`, retrying only errors for which
-/// `filter` returns `true`.
-///
-/// On the first attempt and after each retryable failure, `op` is invoked
-/// again (rebuilt from the captured closure) until it succeeds, the retryable
-/// error becomes permanent, or `max_attempts` is reached. Between attempts the
-/// coroutine sleeps for a backoff delay computed as
-/// `min(max_delay, base_delay * factor^attempt)` with jitter applied per
-/// [`RetryConfig::jitter`].
-///
-/// Each attempt runs inside a `mytheclipse_retry_task` tracing span carrying
-/// the attempt index and total.
 pub async fn retry<T, E, F, Fut, P>(
     config: RetryConfig,
     filter: P,
@@ -200,26 +164,23 @@ where
                         last: err,
                     });
                 }
-                let delay = backoff_delay(&config, attempt, rand::thread_rng());
+                let delay = backoff_delay(&config, attempt, &mut random_rng());
                 tokio::time::sleep(delay).await;
             }
         }
     }
 }
 
-/// Computes the (jittered) delay to sleep before retry `attempt` (1-based).
-///
-/// Kept as a pure function for testability.
-pub(crate) fn backoff_delay<R: Rng>(config: &RetryConfig, attempt: u32, mut rng: R) -> Duration {
-    let exponent = attempt.saturating_sub(1) as f64; // first retry uses base
+pub(crate) fn backoff_delay<R: Rng>(config: &RetryConfig, attempt: u32, rng: &mut R) -> Duration {
+    let exponent = attempt.saturating_sub(1) as f64;
     let computed = config.base_delay.as_millis() as f64 * config.factor.powf(exponent);
     let max_ms = config.max_delay.as_millis() as f64;
     let capped = computed.min(max_ms);
 
     let millis = match config.jitter {
         JitterKind::None => capped,
-        JitterKind::Equal => capped / 2.0 + rng.gen_range(0.0..capped / 2.0),
-        JitterKind::Full => rng.gen_range(0.0..capped),
+        JitterKind::Equal => capped / 2.0 + rng.next_f64() * (capped / 2.0),
+        JitterKind::Full => rng.next_f64() * capped,
     };
 
     Duration::from_millis(millis.clamp(0.0, max_ms) as u64)
@@ -313,7 +274,6 @@ mod tests {
 
     #[tokio::test]
     async fn retry_with_stats_succeeds_with_counts() {
-        use std::cell::Cell;
         let config = RetryConfig {
             max_attempts: 5,
             base_delay: Duration::from_millis(1),
@@ -347,7 +307,7 @@ mod tests {
             factor: 10.0,
             jitter: JitterKind::Full,
         };
-        let mut rng = rand::thread_rng();
+        let mut rng = crate::simple_rng::Xoshiro256::new(0);
         for _ in 0..1000 {
             let d = backoff_delay(&config, 2, &mut rng);
             assert!(d <= config.max_delay);
