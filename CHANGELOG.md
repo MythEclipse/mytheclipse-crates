@@ -1,3 +1,19 @@
+# [2.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.23.1...v2.0.0) (2026-11-03)
+
+
+### chore
+
+* release the dependency rewrite as a major version ([9a70ed1](https://github.com/MythEclipse/mytheclipse-crates/commit/9a70ed18cde5ea73b3c2b19cbfd832205934b008))
+
+
+### BREAKING CHANGES
+
+* mytheclipse-cache no longer has the l1-moka feature (use
+l1-memory), and mytheclipse's compute feature no longer builds a rayon pool:
+EngineContext::compute_pool is gone and compute() runs its closure on the
+calling thread. The rand, num_cpus, thiserror and uuid dependencies are replaced
+by std plus an in-crate generator, so JobId values are no longer UUID-shaped.
+
 ## [1.23.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.23.0...v1.23.1) (2026-11-03)
 
 
