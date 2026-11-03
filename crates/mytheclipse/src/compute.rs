@@ -1,37 +1,109 @@
 //! Panic-isolated heavy compute.
 //!
-//! The parallel primitives here fan work out over `std::thread::scope` threads
-//! sized from the host CPU (see [`compute_threads`]), so the crate needs no
-//! work-stealing runtime of its own. Scoped threads keep the failure modes
-//! simple: each call owns its workers, they cannot outlive it, and nesting a
-//! parallel map inside another one cannot deadlock on a shared pool.
+//! The parallel primitives here fan work out over a process-wide pool of
+//! worker threads sized from the host CPU (see [`worker_count`]), so the crate
+//! needs no work-stealing runtime of its own.
+//!
+//! The pool is the whole point: creating a thread costs tens of microseconds,
+//! so a primitive that spawns its own workers per call would spend more time
+//! starting threads than doing the work it was handed. Workers live for the
+//! life of the process and are started on first use.
+//!
+//! Calls made *from* a pool worker run their chunks inline instead of
+//! submitting them, so nesting a parallel map inside another one can never
+//! block on a pool whose every worker is already waiting.
 
+use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::OnceLock;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::error::MytheclipseError;
 
-/// Number of worker threads the parallel compute primitives start.
+/// A unit of work handed to a pool worker.
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+/// The shared worker pool. Only the submitting half lives here; the workers own
+/// the receiving half and never exit while the process is alive.
+struct Pool {
+    jobs: Sender<Job>,
+}
+
+static POOL: OnceLock<Pool> = OnceLock::new();
+
+thread_local! {
+    /// Set on every pool worker, so a nested call can tell that blocking on the
+    /// pool would deadlock.
+    static ON_WORKER: Cell<bool> = const { Cell::new(false) };
+}
+
+impl Pool {
+    /// The process-wide pool, started on first use.
+    fn global() -> &'static Pool {
+        POOL.get_or_init(|| {
+            let (jobs, queue) = channel::<Job>();
+            let queue = Arc::new(Mutex::new(queue));
+
+            for index in 0..worker_count() {
+                let queue = Arc::clone(&queue);
+                std::thread::Builder::new()
+                    .name(format!("mytheclipse-compute-{index}"))
+                    .spawn(move || {
+                        ON_WORKER.with(|flag| flag.set(true));
+                        loop {
+                            // The lock is held only for the hand-off, never
+                            // while the job runs.
+                            let job = queue.lock().expect("compute queue poisoned").recv();
+                            match job {
+                                Ok(job) => job(),
+                                Err(_) => break,
+                            }
+                        }
+                    })
+                    .expect("spawn a compute worker");
+            }
+
+            Pool { jobs }
+        })
+    }
+
+    /// Queues `job`. Fails only if every worker is gone, which cannot happen
+    /// while the pool is reachable.
+    fn submit(&self, job: Job) {
+        self.jobs
+            .send(job)
+            .expect("compute pool outlived its workers");
+    }
+}
+
+/// `true` when the calling thread is one of this module's workers.
+fn on_worker() -> bool {
+    ON_WORKER.with(Cell::get)
+}
+
+/// Number of worker threads the parallel compute primitives use.
 ///
 /// Defaults to one per logical core minus the one the caller occupies, which is
-/// what [`crate::context::EngineContext::compute_threads`] resolves to as well;
-/// kept as a free function so the primitives work without touching the global
-/// context.
-fn compute_threads() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZeroUsize::get)
-        .unwrap_or(1)
-        .saturating_sub(1)
-        .max(1)
+/// what [`crate::context::EngineContext::compute_threads`] resolves to as well.
+/// Resolved once per process.
+pub fn worker_count() -> usize {
+    static WORKERS: OnceLock<usize> = OnceLock::new();
+    *WORKERS.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .max(1)
+    })
 }
 
 /// Runs `f` on the calling thread and converts a panic into
 /// [`MytheclipseError::ComputePanic`].
 ///
 /// Callers that need the work *off* their own thread should use
-/// [`compute_map`]/[`compute_par_for_each`] (which spawn scoped workers) or
-/// `tokio::task::spawn_blocking`; this function is the panic-isolation wrapper
-/// for a single closure and deliberately does not spawn.
+/// [`compute_map`]/[`compute_par_for_each`] (which hand it to the worker pool)
+/// or `tokio::task::spawn_blocking`; this function is the panic-isolation
+/// wrapper for a single closure and deliberately does not spawn.
 ///
 /// # Panic-safety caveat
 ///
@@ -101,8 +173,8 @@ impl std::error::Error for ComputeErrors {}
 /// Splits `items` into at most `workers` contiguous, owned chunks.
 ///
 /// Contiguity is what keeps [`compute_map`]'s output in input order: chunk `i`
-/// always covers the items before chunk `i + 1`, so concatenating the per-chunk
-/// results in spawn order restores the original sequence.
+/// always covers the items before chunk `i + 1`, so reassembling the per-chunk
+/// results by chunk index restores the original sequence.
 fn into_chunks<T>(items: Vec<T>, workers: usize) -> Vec<Vec<T>> {
     let len = items.len();
     if len == 0 {
@@ -122,13 +194,50 @@ fn into_chunks<T>(items: Vec<T>, workers: usize) -> Vec<Vec<T>> {
     }
 }
 
+/// Applies `f` to every item of every chunk, spreading the chunks over the pool
+/// and returning the per-chunk results **in chunk order**.
+///
+/// Runs inline — on the calling thread, chunk after chunk — when there is only
+/// one chunk or when the caller is already a pool worker.
+fn run_chunks<T, R, F>(chunks: Vec<Vec<T>>, f: Arc<F>) -> Vec<Vec<R>>
+where
+    T: Send + 'static,
+    R: Send + 'static,
+    F: Fn(T) -> R + Send + Sync + 'static,
+{
+    if chunks.len() <= 1 || on_worker() {
+        return chunks
+            .into_iter()
+            .map(|chunk| chunk.into_iter().map(|item| f(item)).collect())
+            .collect();
+    }
+
+    let (results, completed) = channel::<(usize, Vec<R>)>();
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let results = results.clone();
+        let f = Arc::clone(&f);
+        Pool::global().submit(Box::new(move || {
+            let out: Vec<R> = chunk.into_iter().map(|item| f(item)).collect();
+            let _ = results.send((index, out));
+        }));
+    }
+    drop(results);
+
+    // Workers finish out of order; the index is what restores input order.
+    let mut tagged: Vec<(usize, Vec<R>)> = completed.iter().collect();
+    tagged.sort_unstable_by_key(|(index, _)| *index);
+    tagged.into_iter().map(|(_, out)| out).collect()
+}
+
 /// Runs `f` over every item in parallel, returning the results **in input
 /// order**.
 ///
-/// Work is split into one contiguous chunk per worker thread (sized from the
-/// host CPU), each item's closure runs inside [`std::panic::catch_unwind`], and
-/// every failure — returned or panicked — is collected into one
-/// [`ComputeErrors`].
+/// Work is split into one contiguous chunk per worker thread, each item's
+/// closure runs inside [`std::panic::catch_unwind`], and every failure —
+/// returned or panicked — is collected into one [`ComputeErrors`].
+///
+/// The closure and the items must be `'static` because they are handed to
+/// long-lived worker threads.
 ///
 /// ```
 /// use mytheclipse::compute::compute_map;
@@ -139,36 +248,18 @@ fn into_chunks<T>(items: Vec<T>, workers: usize) -> Vec<Vec<T>> {
 pub fn compute_map<I, T, F>(items: I, f: F) -> Result<Vec<T>, ComputeErrors>
 where
     I: IntoIterator,
-    I::Item: Send,
-    T: Send,
-    F: Fn(I::Item) -> Result<T, String> + Send + Sync,
+    I::Item: Send + 'static,
+    T: Send + 'static,
+    F: Fn(I::Item) -> Result<T, String> + Send + Sync + 'static,
 {
-    let chunks = into_chunks(items.into_iter().collect(), compute_threads());
-    let f = &f;
-
-    let per_chunk: Vec<Vec<Result<T, String>>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .into_iter()
-                        .map(|item| {
-                            catch_unwind(AssertUnwindSafe(|| f(item)))
-                                .unwrap_or_else(|payload| Err(panic_payload_to_string(payload)))
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join()
-                    .expect("compute worker panicked outside catch_unwind")
-            })
-            .collect()
-    });
+    let chunks = into_chunks(items.into_iter().collect(), worker_count());
+    let per_chunk = run_chunks(
+        chunks,
+        Arc::new(move |item| {
+            catch_unwind(AssertUnwindSafe(|| f(item)))
+                .unwrap_or_else(|payload| Err(panic_payload_to_string(payload)))
+        }),
+    );
 
     let total: usize = per_chunk.iter().map(Vec::len).sum();
     let mut values = Vec::with_capacity(total);
@@ -189,7 +280,9 @@ where
 
 /// Runs two closures in parallel, returning both results.
 ///
-/// Each branch is panic-isolated: if one panics, its panic becomes a
+/// The first branch goes to the worker pool while the second runs on the
+/// calling thread, so a single free worker is enough to make progress. Each
+/// branch is panic-isolated: if one panics, its panic becomes a
 /// [`MytheclipseError::ComputePanic`] while the other branch still runs to
 /// completion.
 ///
@@ -204,28 +297,30 @@ where
 /// ```
 pub fn compute_join<A, RA, B, RB>(a: A, b: B) -> Result<(RA, RB), MytheclipseError>
 where
-    A: FnOnce() -> RA + Send,
-    RA: Send,
-    B: FnOnce() -> RB + Send,
-    RB: Send,
+    A: FnOnce() -> RA + Send + 'static,
+    RA: Send + 'static,
+    B: FnOnce() -> RB + Send + 'static,
+    RB: Send + 'static,
 {
-    let (left, right) = std::thread::scope(|scope| {
-        let left = scope.spawn(move || {
-            catch_unwind(AssertUnwindSafe(a))
-                .map_err(|p| MytheclipseError::ComputePanic(panic_payload_to_string(p)))
-        });
-        let right = scope.spawn(move || {
-            catch_unwind(AssertUnwindSafe(b))
-                .map_err(|p| MytheclipseError::ComputePanic(panic_payload_to_string(p)))
-        });
-        (
-            left.join()
-                .expect("join branch panicked outside catch_unwind"),
-            right
-                .join()
-                .expect("join branch panicked outside catch_unwind"),
-        )
-    });
+    if on_worker() {
+        let left = catch_unwind(AssertUnwindSafe(a))
+            .map_err(|payload| MytheclipseError::ComputePanic(panic_payload_to_string(payload)));
+        let right = catch_unwind(AssertUnwindSafe(b))
+            .map_err(|payload| MytheclipseError::ComputePanic(panic_payload_to_string(payload)));
+        return Ok((left?, right?));
+    }
+
+    let (left, completed) = channel::<Result<RA, String>>();
+    Pool::global().submit(Box::new(move || {
+        let _ = left.send(catch_unwind(AssertUnwindSafe(a)).map_err(panic_payload_to_string));
+    }));
+
+    let right = catch_unwind(AssertUnwindSafe(b))
+        .map_err(|payload| MytheclipseError::ComputePanic(panic_payload_to_string(payload)));
+    let left = completed
+        .recv()
+        .expect("compute worker dropped a join branch")
+        .map_err(MytheclipseError::ComputePanic);
 
     Ok((left?, right?))
 }
@@ -249,35 +344,17 @@ where
 pub fn compute_par_for_each<I, F>(items: I, f: F) -> Result<(), ComputeErrors>
 where
     I: IntoIterator,
-    I::Item: Send,
-    F: Fn(I::Item) -> Result<(), String> + Send + Sync,
+    I::Item: Send + 'static,
+    F: Fn(I::Item) -> Result<(), String> + Send + Sync + 'static,
 {
-    let chunks = into_chunks(items.into_iter().collect(), compute_threads());
-    let f = &f;
-
-    let per_chunk: Vec<Vec<Result<(), String>>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = chunks
-            .into_iter()
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .into_iter()
-                        .map(|item| {
-                            catch_unwind(AssertUnwindSafe(|| f(item)))
-                                .unwrap_or_else(|payload| Err(panic_payload_to_string(payload)))
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join()
-                    .expect("compute worker panicked outside catch_unwind")
-            })
-            .collect()
-    });
+    let chunks = into_chunks(items.into_iter().collect(), worker_count());
+    let per_chunk = run_chunks(
+        chunks,
+        Arc::new(move |item| {
+            catch_unwind(AssertUnwindSafe(|| f(item)))
+                .unwrap_or_else(|payload| Err(panic_payload_to_string(payload)))
+        }),
+    );
 
     let errors: Vec<String> = per_chunk
         .into_iter()
@@ -290,15 +367,6 @@ where
     } else {
         Err(ComputeErrors { errors })
     }
-}
-
-/// Number of worker threads the parallel compute primitives use.
-///
-/// Exposed so callers can size their own chunking to match; it is resolved once
-/// from the host CPU.
-pub fn worker_count() -> usize {
-    static WORKERS: OnceLock<usize> = OnceLock::new();
-    *WORKERS.get_or_init(compute_threads)
 }
 
 #[cfg(test)]
@@ -360,6 +428,20 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    /// A nested parallel map runs on a worker, so it must take the inline path
+    /// rather than block on a pool it is itself occupying.
+    #[test]
+    fn nested_compute_map_does_not_deadlock() {
+        let out = compute_map(0..64u32, |x| {
+            let inner =
+                compute_map(0..4u32, move |y| Ok::<_, String>(x * y)).map_err(|e| e.to_string())?;
+            Ok::<_, String>(inner.into_iter().sum::<u32>())
+        })
+        .unwrap();
+
+        assert_eq!(out, (0..64u32).map(|x| x * 6).collect::<Vec<_>>());
+    }
+
     #[test]
     fn compute_join_runs_both_branches() {
         let (a, b) = compute_join(
@@ -379,10 +461,22 @@ mod tests {
         assert_eq!(ok, (1, 2));
     }
 
+    /// Nested joins run inline, so a branch that itself joins cannot starve the
+    /// pool.
+    #[test]
+    fn nested_compute_join_does_not_deadlock() {
+        let (a, b) = compute_join(
+            || compute_join(|| 1u32, || 2u32).unwrap(),
+            || compute_join(|| 3u32, || 4u32).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(a, (1, 2));
+        assert_eq!(b, (3, 4));
+    }
+
     #[test]
     fn compute_par_for_each_runs_all_side_effects() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
 
         let count = Arc::new(AtomicUsize::new(0));
         let c = Arc::clone(&count);
