@@ -22,7 +22,6 @@ amqp = ["dep:lapin", "dep:futures-lite"]
 nats = ["dep:async-nats", "dep:futures-util", "dep:bytes"]
 
 [dependencies]
-tracing = "0.1"
 # Required unconditionally: the core `EventBus`/`Subscription` traits (always
 # compiled) use it.
 async-trait = "0.1"

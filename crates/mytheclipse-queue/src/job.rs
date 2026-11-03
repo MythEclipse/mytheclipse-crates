@@ -2,6 +2,8 @@
 //!
 //! A minimal, dependency-free in-process job queue using `tokio::sync::mpsc`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 /// A unique identifier for a queued job.
@@ -9,8 +11,26 @@ use std::time::{Duration, SystemTime};
 pub struct JobId(pub String);
 
 impl JobId {
+    /// Generates an id that is unique within this process and across restarts.
+    ///
+    /// The prefix is fixed once per process from the start instant and the pid,
+    /// so two runs never overlap; the suffix is a monotonic counter, so two jobs
+    /// in one run never collide. This replaces a random UUID: uniqueness is the
+    /// only property callers need, and a counter gets it without a random
+    /// source or a 36-byte string.
     pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        static PREFIX: OnceLock<String> = OnceLock::new();
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let prefix = PREFIX.get_or_init(|| {
+            let nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            format!("{nanos:x}{:x}", std::process::id())
+        });
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self(format!("{prefix}-{sequence:x}"))
     }
 }
 
@@ -53,5 +73,25 @@ impl Job {
             delivered_at: Some(now),
             visibility_timeout: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_ids_are_unique() {
+        let a = JobId::generate();
+        let b = JobId::generate();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn generated_ids_share_the_process_prefix() {
+        let a = JobId::generate().0;
+        let b = JobId::generate().0;
+        let prefix = |s: &str| s.rsplit_once('-').unwrap().0.to_owned();
+        assert_eq!(prefix(&a), prefix(&b));
     }
 }
