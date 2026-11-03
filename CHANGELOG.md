@@ -1,3 +1,10 @@
+# [5.1.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v5.0.0...v5.1.0) (2026-11-03)
+
+
+### Features
+
+* add a prelude to every crate ([fd913f3](https://github.com/MythEclipse/mytheclipse-crates/commit/fd913f39eb7f7dce559c9ef12270c73c13c165da))
+
 # [5.0.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v4.1.0...v5.0.0) (2026-11-03)
 
 
