@@ -1,3 +1,17 @@
+## [1.21.3](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.2...v1.21.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* **cache:** hold cache state under one lock and evict in O(1) ([6fbaec0](https://github.com/MythEclipse/mytheclipse-crates/commit/6fbaec0c4f427f30b6e9e946b136dbf420fd1b88))
+* **lifecycle:** fence lock leases and release them without a runtime ([41267ca](https://github.com/MythEclipse/mytheclipse-crates/commit/41267ca0a583be3fea7292a8a74efdce56919838))
+* **lifecycle:** skip impossible days when finding the next cron fire ([2af626e](https://github.com/MythEclipse/mytheclipse-crates/commit/2af626eed8b33e69cd658a0f789d713ef4883ed8))
+* **observability:** stop allocating per metrics record ([7409b9c](https://github.com/MythEclipse/mytheclipse-crates/commit/7409b9c19d0028b342cd5ba802c12316880188a6))
+* **queue:** hold concurrency permits for the whole job ([be5d5c9](https://github.com/MythEclipse/mytheclipse-crates/commit/be5d5c95522f04492d2cc377f124a1990d7e4472))
+* **resiliency:** make half-open probe accounting atomic ([1ec8d8d](https://github.com/MythEclipse/mytheclipse-crates/commit/1ec8d8d0b8dd75b99180004da3a554fa4ffdfe1f))
+* **traffic:** give each semaphore pool its own rotation cursor ([9858d94](https://github.com/MythEclipse/mytheclipse-crates/commit/9858d9431513fa1287acf312ce2b749445d623a7))
+* **traffic:** guard the rate limiter bucket with one lock ([3a9f6e2](https://github.com/MythEclipse/mytheclipse-crates/commit/3a9f6e267b37fe70ebdacc6d102f3692064d13f9))
+
 ## [1.21.2](https://github.com/asepharyana/mytheclipse/compare/v1.21.1...v1.21.2) (2026-08-30)
 
 
