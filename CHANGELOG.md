@@ -1,3 +1,10 @@
+## [1.22.2](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.1...v1.22.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **tracing:** log to stderr, filter at info, and report failed installs ([defa9af](https://github.com/MythEclipse/mytheclipse-crates/commit/defa9af6bca8531265d9bf44ce33c126f0473c32))
+
 ## [1.22.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.0...v1.22.1) (2026-11-03)
 
 

@@ -1,6 +1,6 @@
 [package]
 name = "mytheclipse-tracing"
-version = "1.22.1"
+version = "1.22.2"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
