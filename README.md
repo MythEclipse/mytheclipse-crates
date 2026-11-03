@@ -66,13 +66,13 @@ regression baseline, not an absolute target:
 | `semaphore_pool` acquire+release | 114 ns |
 | `dlock` acquire+release (1k live keys) | 147 ns |
 | `cache` set at capacity (evict) | 130 ns |
-| `cron` next_after, hourly / yearly | 0.75 µs / 2.0 µs |
+| `cron` next_after, hourly / yearly | 0.62 µs / 2.0 µs |
 | `metrics` export_prometheus (64 series) | 11 µs |
-| `parallel_map` 1000 items @ 8 | 130 µs |
+| `parallel_map` 1000 items @ 8 | 120 µs |
 
 `parallel_map` and `parallel_for_each` spawn `concurrency` workers that pull
 from a shared iterator rather than one task per item, which is what keeps the
-1000-item case at 130 µs instead of 527 µs.
+1000-item case at 120 µs instead of 527 µs.
 
 ## Development
 
