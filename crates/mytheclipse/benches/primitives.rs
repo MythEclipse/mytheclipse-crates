@@ -15,6 +15,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 
 use mytheclipse::aggregate_error::AggregateError;
+use mytheclipse::compute::{compute_join, compute_map, compute_par_for_each};
 use mytheclipse::cron::CronTime;
 use mytheclipse::parallel_map::{parallel_for_each, parallel_map};
 use mytheclipse::pool::{Pool, SemaphorePool};
@@ -43,6 +44,19 @@ fn bench_parallel_map(c: &mut Criterion) {
         });
     });
 
+    // Fixed cost of the abstraction: 8 items through 8 workers is the
+    // worst case for fan-out overhead, because every worker is spawned and
+    // claims exactly one item.
+    c.bench_function("parallel_map/8x8", |b| {
+        b.to_async(&rt).iter(|| async {
+            let items: Vec<u32> = (0..8).collect();
+            let out = parallel_map(items, 8, |x| async move { Ok::<_, std::io::Error>(x * 2) })
+                .await
+                .unwrap();
+            let _ = black_box(out);
+        });
+    });
+
     // Sequential baseline for comparison.
     c.bench_function("sequential/map_1000", |b| {
         b.iter(|| {
@@ -55,6 +69,16 @@ fn bench_parallel_map(c: &mut Criterion) {
 
 fn bench_parallel_for_each(c: &mut Criterion) {
     let rt = rt();
+    c.bench_function("parallel_for_each/8x8", |b| {
+        b.to_async(&rt).iter(|| async {
+            parallel_for_each(0u32..8, 8, |x| async move {
+                let _ = black_box(x);
+                Ok::<_, std::io::Error>(())
+            })
+            .await
+            .unwrap();
+        });
+    });
     c.bench_function("parallel_for_each/1000x8", |b| {
         b.to_async(&rt).iter(|| async {
             parallel_for_each(
@@ -269,7 +293,18 @@ fn bench_cron(c: &mut Criterion) {
         b.iter(|| CronSchedule::parse("*/5 * * * *").unwrap());
     });
 
-    let from = CronTime::now();
+    // A fixed instant, not `CronTime::now()`: the cost of `next_after` grows
+    // with how far ahead the answer lies, so anchoring to the wall clock made
+    // this bench report anything from 30 ns to 1.3 µs depending on the minute it
+    // happened to run in.
+    let from = CronTime {
+        year: 2026,
+        month: 11,
+        day: 3,
+        hour: 10,
+        minute: 17,
+        second: 0,
+    };
     let hourly = CronSchedule::parse("0 * * * *").unwrap();
     g.bench_function("next_after_hourly", |b| {
         b.iter(|| black_box(hourly.next_after(from)));
@@ -303,6 +338,45 @@ fn bench_backpressure(c: &mut Criterion) {
     });
 }
 
+fn bench_compute(c: &mut Criterion) {
+    let items: Vec<u64> = (0..1000).collect();
+    c.bench_function("compute_map/1000", |b| {
+        b.iter(|| {
+            let out = compute_map(items.clone(), |x| Ok::<_, String>(x * 2)).unwrap();
+            let _ = black_box(out);
+        });
+    });
+
+    let small: Vec<u64> = (0..8).collect();
+    c.bench_function("compute_map/8", |b| {
+        b.iter(|| {
+            let out = compute_map(small.clone(), |x| Ok::<_, String>(x * 2)).unwrap();
+            let _ = black_box(out);
+        });
+    });
+
+    c.bench_function("compute_par_for_each/1000", |b| {
+        b.iter(|| {
+            compute_par_for_each(0u64..1000, |x| {
+                black_box(x);
+                Ok::<_, String>(())
+            })
+            .unwrap();
+        });
+    });
+
+    c.bench_function("compute_join", |b| {
+        b.iter(|| {
+            let out = compute_join(
+                || (0..1000u64).sum::<u64>(),
+                || (1000..2000u64).sum::<u64>(),
+            )
+            .unwrap();
+            let _ = black_box(out);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_parallel_map,
@@ -318,5 +392,6 @@ criterion_group!(
     bench_cron,
     bench_concurrency_limiter,
     bench_backpressure,
+    bench_compute,
 );
 criterion_main!(benches);
