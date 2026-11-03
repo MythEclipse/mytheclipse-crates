@@ -26,12 +26,42 @@ impl JobId {
             let nanos = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos();
-            format!("{nanos:x}{:x}", std::process::id())
+                .as_nanos() as u64;
+            let mut prefix = String::with_capacity(32);
+            push_hex(&mut prefix, nanos);
+            push_hex(&mut prefix, u64::from(std::process::id()));
+            prefix
         });
         let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-        Self(format!("{prefix}-{sequence:x}"))
+
+        // Size the id up front: `format!` would start at capacity zero and
+        // reallocate twice on the way to ~40 bytes, which is most of what this
+        // function used to cost.
+        let mut id = String::with_capacity(prefix.len() + 17);
+        id.push_str(prefix);
+        id.push('-');
+        push_hex(&mut id, sequence);
+        Self(id)
     }
+}
+
+/// Appends `value` as lowercase hex. Avoids the `fmt` machinery, which is
+/// measurably slower than 16 shifts for a value this short.
+fn push_hex(out: &mut String, value: u64) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    let mut buf = [0u8; 16];
+    let mut cursor = buf.len();
+    let mut rest = value;
+    loop {
+        cursor -= 1;
+        buf[cursor] = DIGITS[(rest & 0xf) as usize];
+        rest >>= 4;
+        if rest == 0 {
+            break;
+        }
+    }
+    out.push_str(std::str::from_utf8(&buf[cursor..]).expect("hex digits are ASCII"));
 }
 
 impl std::fmt::Display for JobId {
