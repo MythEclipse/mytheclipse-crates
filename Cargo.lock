@@ -1635,7 +1635,6 @@ dependencies = [
 name = "mytheclipse-tracing"
 version = "1.22.1"
 dependencies = [
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]

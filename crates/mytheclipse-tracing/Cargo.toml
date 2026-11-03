@@ -21,6 +21,3 @@ env = ["dep:tracing-subscriber"]
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"], optional = true }
-
-[dev-dependencies]
-tokio = { version = "1.53", features = ["full"] }
