@@ -7,7 +7,7 @@
 //! cleanup. Numbers (per-op) should be tiny; anything in the µs+ range for a
 //! single primitive would signal a regression.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,12 +15,17 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 
 use mytheclipse::aggregate_error::AggregateError;
+use mytheclipse::cron::CronTime;
 use mytheclipse::parallel_map::{parallel_for_each, parallel_map};
 use mytheclipse::pool::{Pool, SemaphorePool};
 use mytheclipse::ratelimit::RateLimiter;
 use mytheclipse::retry::RetryConfig;
 use mytheclipse::retry_ext::RetryExt;
 use mytheclipse::shutdown_guard::ShutdownGuard;
+use mytheclipse::{
+    BackpressureQueue, CircuitBreaker, CircuitBreakerConfig, ConcurrencyLimiter, CronSchedule,
+    DistributedLock, InProcLock, MetricsCollector, OverflowPolicy,
+};
 
 fn rt() -> Runtime {
     Runtime::new().expect("tokio runtime")
@@ -171,6 +176,133 @@ fn bench_shutdown_guard(c: &mut Criterion) {
     });
 }
 
+fn bench_metrics(c: &mut Criterion) {
+    let mut g = c.benchmark_group("metrics");
+    let hot = MetricsCollector::new();
+    hot.inc_counter("hot", 1);
+
+    g.bench_function("inc_counter_existing", |b| {
+        b.iter(|| hot.inc_counter("hot", 1));
+    });
+
+    // Same operation on a collector that already carries 64 series, which is
+    // the realistic steady state of an app reporting per-route metrics.
+    let wide = MetricsCollector::new();
+    for i in 0..64 {
+        wide.inc_counter(&format!("series_{i}"), 1);
+    }
+    g.bench_function("inc_counter_among_64", |b| {
+        b.iter(|| wide.inc_counter("series_63", 1));
+    });
+
+    g.bench_function("set_gauge_existing", |b| {
+        b.iter(|| hot.set_gauge("g", 1.5));
+    });
+    g.bench_function("observe_existing", |b| {
+        b.iter(|| hot.observe("lat", Duration::from_micros(120)));
+    });
+    g.bench_function("export_prometheus_64", |b| {
+        b.iter(|| black_box(wide.export_prometheus()));
+    });
+    g.finish();
+}
+
+fn bench_circuit_breaker(c: &mut Criterion) {
+    let mut g = c.benchmark_group("circuit_breaker");
+    let closed = CircuitBreaker::new(CircuitBreakerConfig::default());
+    g.bench_function("closed_allow_record_success", |b| {
+        b.iter(|| {
+            if closed.allow_request() {
+                closed.record_success();
+            }
+        });
+    });
+
+    let open = CircuitBreaker::new(CircuitBreakerConfig {
+        failure_threshold: 1,
+        open_timeout: Duration::from_secs(3600),
+        ..CircuitBreakerConfig::default()
+    });
+    open.record_failure();
+    g.bench_function("open_reject", |b| {
+        b.iter(|| black_box(open.allow_request()));
+    });
+    g.finish();
+}
+
+fn bench_dlock(c: &mut Criterion) {
+    let rt = rt();
+    let mut g = c.benchmark_group("dlock");
+
+    let single = InProcLock::new();
+    g.bench_function("acquire_release_same_key", |b| {
+        b.to_async(&rt).iter(|| async {
+            let guard = single
+                .acquire("k", Duration::from_secs(60), Duration::from_millis(1))
+                .await
+                .unwrap();
+            drop(guard);
+        });
+    });
+
+    // A thousand live leases in the map: acquisition must stay O(1), so this
+    // should track `acquire_release_same_key` rather than grow with map size.
+    let many = InProcLock::new();
+    let keys: Vec<String> = (0..1000).map(|i| format!("key_{i}")).collect();
+    let next = AtomicUsize::new(0);
+    g.bench_function("acquire_release_1000_keys", |b| {
+        b.to_async(&rt).iter(|| async {
+            let i = next.fetch_add(1, Ordering::Relaxed) % keys.len();
+            let guard = many
+                .acquire(&keys[i], Duration::from_secs(60), Duration::from_millis(1))
+                .await
+                .unwrap();
+            drop(guard);
+        });
+    });
+    g.finish();
+}
+
+fn bench_cron(c: &mut Criterion) {
+    let mut g = c.benchmark_group("cron");
+    g.bench_function("parse_5_field", |b| {
+        b.iter(|| CronSchedule::parse("*/5 * * * *").unwrap());
+    });
+
+    let from = CronTime::now();
+    let hourly = CronSchedule::parse("0 * * * *").unwrap();
+    g.bench_function("next_after_hourly", |b| {
+        b.iter(|| black_box(hourly.next_after(from)));
+    });
+
+    // Worst case for the scan: a schedule that matches once every four years.
+    let yearly = CronSchedule::parse("0 12 29 2 *").unwrap();
+    g.bench_function("next_after_yearly", |b| {
+        b.iter(|| black_box(yearly.next_after(from)));
+    });
+    g.finish();
+}
+
+fn bench_concurrency_limiter(c: &mut Criterion) {
+    let limiter = ConcurrencyLimiter::new(8);
+    c.bench_function("concurrency_limiter/try_acquire_release", |b| {
+        b.iter(|| {
+            let permit = limiter.try_acquire().expect("free slot");
+            drop(permit);
+        });
+    });
+}
+
+fn bench_backpressure(c: &mut Criterion) {
+    let queue = BackpressureQueue::new(1024, OverflowPolicy::DropOldest);
+    c.bench_function("backpressure/push_pop", |b| {
+        b.iter(|| {
+            let _ = queue.try_push(1u64);
+            black_box(queue.try_pop());
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_parallel_map,
@@ -180,5 +312,11 @@ criterion_group!(
     bench_semaphore_pool,
     bench_aggregate_error,
     bench_shutdown_guard,
+    bench_metrics,
+    bench_circuit_breaker,
+    bench_dlock,
+    bench_cron,
+    bench_concurrency_limiter,
+    bench_backpressure,
 );
 criterion_main!(benches);
