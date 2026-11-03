@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.5...v1.22.0) (2026-11-03)
+
+
+### Features
+
+* **queue:** re-export the queue types at the crate root ([cd4d6af](https://github.com/MythEclipse/mytheclipse-crates/commit/cd4d6af7d052a67803a020064f5d60c5c64aef48))
+
 ## [1.21.5](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.4...v1.21.5) (2026-11-03)
 
 
