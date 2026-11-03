@@ -10,8 +10,6 @@ use async_trait::async_trait;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 
-static ACQUIRE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
 /// Errors returned by pool operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PoolError {
@@ -39,6 +37,9 @@ pub trait Pool<T>: Send + Sync {
 pub struct SemaphorePool<T: Clone> {
     semaphore: Arc<Semaphore>,
     items: Arc<Vec<T>>,
+    /// Round-robin cursor over `items`, owned by this pool so that two pools
+    /// hand out their items independently.
+    cursor: Arc<AtomicUsize>,
 }
 
 impl<T: Clone> SemaphorePool<T> {
@@ -48,11 +49,21 @@ impl<T: Clone> SemaphorePool<T> {
     }
 
     /// Creates a new pool from a vector of items.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `items` is empty: a pool with no resources could never serve
+    /// an [`acquire`](Pool::acquire).
     pub fn new(items: Vec<T>) -> Self {
-        let permits = items.len().max(1);
+        assert!(
+            !items.is_empty(),
+            "mytheclipse: SemaphorePool needs at least one item"
+        );
+        let permits = items.len();
         Self {
             semaphore: Arc::new(Semaphore::new(permits)),
             items: Arc::new(items),
+            cursor: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -66,7 +77,7 @@ impl<T: Clone + Send + Sync + 'static> Pool<T> for SemaphorePool<T> {
             .acquire_owned()
             .await
             .map_err(|_| PoolError::Exhausted)?;
-        let idx = ACQUIRE_COUNT.fetch_add(1, Ordering::Relaxed) % self.items.len();
+        let idx = self.cursor.fetch_add(1, Ordering::Relaxed) % self.items.len();
         Ok(Pooled {
             resource: self.items[idx].clone(),
             _permit: permit,
@@ -181,6 +192,23 @@ mod tests {
         let pool = SemaphorePool::new(vec![42u32, 84u32]);
         let item = pool.acquire().await.unwrap();
         assert!(item.resource == 42 || item.resource == 84);
+    }
+
+    #[tokio::test]
+    async fn each_pool_hands_out_its_own_items_in_order() {
+        let a = SemaphorePool::new(vec![1u32, 2]);
+        let b = SemaphorePool::new(vec![10u32, 20]);
+        // Interleaved acquisitions must not disturb pool A's rotation.
+        assert_eq!(a.acquire().await.unwrap().resource, 1);
+        assert_eq!(b.acquire().await.unwrap().resource, 10);
+        assert_eq!(a.acquire().await.unwrap().resource, 2);
+        assert_eq!(b.acquire().await.unwrap().resource, 20);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one item")]
+    fn empty_pool_panics() {
+        let _: SemaphorePool<u32> = SemaphorePool::new(Vec::new());
     }
 
     struct Probe {
