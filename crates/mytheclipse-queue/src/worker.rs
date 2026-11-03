@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::error::JobError;
+use crate::host;
 use crate::job::Job;
 use crate::traits::Queue;
 
@@ -31,7 +32,7 @@ where
 /// Configuration for the worker pool.
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
-    /// Maximum concurrent job handlers.
+    /// Maximum concurrent job handlers (default: one per logical CPU).
     pub concurrency: usize,
     /// Maximum number of retry attempts (0 = no retries).
     pub max_retries: u32,
@@ -50,7 +51,7 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            concurrency: 4,
+            concurrency: host::available_parallelism(),
             max_retries: 3,
             retry_base_delay: Duration::from_millis(500),
             retry_max_delay: Duration::from_secs(10),

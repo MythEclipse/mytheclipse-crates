@@ -43,7 +43,7 @@ pub struct BatchConfig {
     pub batch_size: usize,
     /// Max time to wait before flushing a partial batch.
     pub batch_timeout: Duration,
-    /// Max concurrent batch-processing tasks.
+    /// Max concurrent batch-processing tasks (default: one per logical CPU).
     pub concurrency: usize,
 }
 
@@ -52,7 +52,7 @@ impl Default for BatchConfig {
         Self {
             batch_size: 100,
             batch_timeout: Duration::from_secs(5),
-            concurrency: 4,
+            concurrency: crate::host::available_parallelism(),
         }
     }
 }

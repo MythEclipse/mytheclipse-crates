@@ -6,10 +6,12 @@
 //! queue.
 //!
 //! The backend that ships is in-memory (`InMemoryQueue`, feature `in-memory`):
-//! `tokio::sync::mpsc` plus task spawning, no external service. `Queue` is a
+//! one `Mutex<Vec<Job>>` + `Notify` per topic, no external service. `Queue` is a
 //! trait, so another transport can implement it without touching `WorkerPool`.
 
 pub mod error;
+#[cfg(feature = "in-memory")]
+mod host;
 #[cfg(feature = "in-memory")]
 pub mod in_memory;
 pub mod job;
