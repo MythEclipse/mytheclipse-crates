@@ -48,39 +48,28 @@ impl<E: std::fmt::Debug + std::fmt::Display> std::error::Error for RunError<E> {
 
 // Config ------------------------------------------------------------------
 
-#[cfg(not(feature = "traffic"))]
+/// Configuration for [`ServiceBuilder::run`].
+///
+/// The rate-limit fields only exist with the `traffic` feature, which is what
+/// makes them enforceable.
 #[derive(Clone)]
 pub struct ServiceConfig {
     pub max_attempts: u32,
     pub timeout: Duration,
-}
-
-#[cfg(not(feature = "traffic"))]
-impl Default for ServiceConfig {
-    fn default() -> Self {
-        Self {
-            max_attempts: 0,
-            timeout: Duration::ZERO,
-        }
-    }
-}
-
-#[cfg(feature = "traffic")]
-#[derive(Clone)]
-pub struct ServiceConfig {
-    pub max_attempts: u32,
-    pub timeout: Duration,
+    #[cfg(feature = "traffic")]
     pub rate_per_sec: f64,
+    #[cfg(feature = "traffic")]
     pub rate_burst: u64,
 }
 
-#[cfg(feature = "traffic")]
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             max_attempts: 0,
             timeout: Duration::ZERO,
+            #[cfg(feature = "traffic")]
             rate_per_sec: 0.0,
+            #[cfg(feature = "traffic")]
             rate_burst: 0,
         }
     }

@@ -118,6 +118,8 @@ impl Queue for InMemoryQueue {
     }
 
     async fn ack(&self, _job: &Job) -> Result<(), JobError> {
+        // Dequeue already removed the job, so there is nothing left to
+        // acknowledge; the in-flight copy is the handler's own.
         Ok(())
     }
 
