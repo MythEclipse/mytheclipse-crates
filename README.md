@@ -13,19 +13,17 @@ concern.
 | :--- | :--- | :--- |
 | [`mytheclipse`](crates/mytheclipse) | Resource-aware execution primitives (async I/O, compute, background queues), resiliency (retry, circuit breaker, timeout), traffic control (rate limiter, backpressure, concurrency limiter), lifecycle (graceful shutdown, cron, async lifecycle manager, distributed lock), and observability (metrics, panic tracking, metrics-to-health bridge). | [README](crates/mytheclipse/README.md) |
 | [`mytheclipse-cache`](crates/mytheclipse-cache) | Unified multi-layer (L1/L2) cache abstraction: in-memory or Moka L1, Redis/Valkey L2, cache-aside read-through. | [README](crates/mytheclipse-cache/README.md) |
-| [`mytheclipse-storage`](crates/mytheclipse-storage) | Unified storage & file system abstraction: one driver interface over local disk, S3/MinIO, and Google Cloud Storage, stream-based. | [README](crates/mytheclipse-storage/README.md) |
 | [`mytheclipse-event`](crates/mytheclipse-event) | Unified events & message bus abstraction: in-memory pub/sub dispatcher plus RabbitMQ and NATS broker adapters behind one trait. | [README](crates/mytheclipse-event/README.md) |
 | [`mytheclipse-config`](crates/mytheclipse-config) | Type-safe, dynamic configuration engine: load `.env`/YAML/JSON/TOML into typed structs, with hot-reload and typed validation. | [README](crates/mytheclipse-config/README.md) |
 | [`mytheclipse-crypto`](crates/mytheclipse-crypto) | Safe hashing (Argon2id), encryption (AES-256-GCM), JWT and PASETO tokens, with key rotation support. | [README](crates/mytheclipse-crypto/README.md) |
 | [`mytheclipse-queue`](crates/mytheclipse-queue) | Unified job queue abstraction with WorkerPool executor, retry/backoff, and dead-letter support. Backends: in-memory, Redis, NATS, PostgreSQL. | [README](crates/mytheclipse-queue/README.md) |
 | [`mytheclipse-tracing`](crates/mytheclipse-tracing) | Pre-built tracing subscriber layers with env filtering and optional OTLP/Jaeger/Zipkin export. | [README](crates/mytheclipse-tracing/README.md) |
-| [`mytheclipse-http`](crates/mytheclipse-http) | HTTP client and server abstraction with built-in retry, circuit breaker, timeout, and rate limiting. | [README](crates/mytheclipse-http/README.md) |
 | [`mytheclipse-cli`](crates/mytheclipse-cli) | CLI framework for mytheclipse applications with built-in subcommands (serve, worker, migrate, health, version). | [README](crates/mytheclipse-cli/README.md) |
 
 Every crate follows the same philosophy: **one small interface, pluggable
 backends behind feature flags, and a working default that needs no external
-service to build or test.** Distributed backends (Redis, S3, GCS, RabbitMQ,
-NATS) are feature-gated and their integration tests are `#[ignore]`d unless
+service to build or test.** Distributed backends (Redis, RabbitMQ, NATS) are
+feature-gated and their integration tests are `#[ignore]`d unless
 the corresponding environment variables point at a live service.
 
 ## Getting started
@@ -36,7 +34,6 @@ Each crate is published independently; add the ones you need:
 [dependencies]
 mytheclipse = { version = "1", features = ["full"] }
 mytheclipse-cache = "0.1"
-mytheclipse-storage = { version = "0.1", features = ["s3"] }
 mytheclipse-event = { version = "0.1", features = ["nats"] }
 mytheclipse-config = "0.1"
 mytheclipse-crypto = "0.1"

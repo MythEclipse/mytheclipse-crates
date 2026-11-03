@@ -2,13 +2,11 @@
 members = [
     "crates/mytheclipse",
     "crates/mytheclipse-cache",
-    "crates/mytheclipse-storage",
     "crates/mytheclipse-event",
     "crates/mytheclipse-config",
     "crates/mytheclipse-crypto",
     "crates/mytheclipse-queue",
     "crates/mytheclipse-tracing",
-    "crates/mytheclipse-http",
     "crates/mytheclipse-cli",
 ]
 resolver = "2"
