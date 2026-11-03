@@ -3,7 +3,6 @@ members = [
     "crates/mytheclipse",
     "crates/mytheclipse-cache",
     "crates/mytheclipse-event",
-    "crates/mytheclipse-config",
     "crates/mytheclipse-queue",
     "crates/mytheclipse-tracing",
     "crates/mytheclipse-cli",

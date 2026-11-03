@@ -40,7 +40,7 @@ jobs:
       # an already-uploaded version is tolerated (idempotent re-runs).
       - name: Publish workspace crates
         run: |
-          for crate in mytheclipse mytheclipse-cache mytheclipse-event mytheclipse-config mytheclipse-queue mytheclipse-tracing; do
+          for crate in mytheclipse mytheclipse-cache mytheclipse-event mytheclipse-queue mytheclipse-tracing; do
             echo "Publishing $crate..."
             if cargo publish -p "$crate" --allow-dirty --no-verify; then
               echo "$crate published OK"
