@@ -1,3 +1,11 @@
+## [1.21.5](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.4...v1.21.5) (2026-11-03)
+
+
+### Performance Improvements
+
+* **lifecycle:** skip whole months and hours in cron next_after ([d607631](https://github.com/MythEclipse/mytheclipse-crates/commit/d607631481690524265285a3e8ac8871dc7b2caf))
+* **resiliency:** fan out with worker tasks instead of one per item ([3407bd7](https://github.com/MythEclipse/mytheclipse-crates/commit/3407bd7878e8bbc594065cffd51e37e5d36ad6e4))
+
 ## [1.21.4](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.3...v1.21.4) (2026-11-03)
 
 
