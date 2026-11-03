@@ -1,3 +1,11 @@
+## [1.22.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.22.0...v1.22.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **queue:** drop the redis, nats and postgres features ([71675e9](https://github.com/MythEclipse/mytheclipse-crates/commit/71675e9a0beee0e00793997e00747d7159d819ef))
+* **tracing:** drop the otel, jaeger and zipkin features ([149fb71](https://github.com/MythEclipse/mytheclipse-crates/commit/149fb71a209491f9050175e87e182eaf115f967c))
+
 # [1.22.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v1.21.5...v1.22.0) (2026-11-03)
 
 
