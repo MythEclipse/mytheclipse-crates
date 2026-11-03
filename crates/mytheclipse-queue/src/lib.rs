@@ -9,6 +9,7 @@
 //! one `Mutex<Vec<Job>>` + `Notify` per topic, no external service. `Queue` is a
 //! trait, so another transport can implement it without touching `WorkerPool`.
 
+#![deny(missing_docs)]
 pub mod error;
 #[cfg(feature = "in-memory")]
 mod host;
@@ -48,3 +49,19 @@ pub use worker_rate_limited::RateLimitedWorkerPool;
 pub mod pipeline;
 #[cfg(feature = "in-memory")]
 pub use pipeline::{Stage, StageError, StageRunner};
+
+/// The common case, in one import.
+///
+/// ```
+/// use mytheclipse_queue::prelude::*;
+/// ```
+///
+/// [`Queue`] and [`JobHandler`] are the reason this exists: `enqueue` and
+/// `handle` are trait methods, so they are not callable until the traits are in
+/// scope.
+pub mod prelude {
+    pub use crate::{Job, JobError, JobFuture, JobHandler, Queue, QueueError};
+
+    #[cfg(feature = "in-memory")]
+    pub use crate::{InMemoryQueue, WorkerPool};
+}

@@ -42,7 +42,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
-
+#![deny(missing_docs)]
 pub mod traits;
 
 #[cfg(feature = "l1-memory")]
@@ -79,3 +79,26 @@ pub use cache_aside::CacheAside;
 
 #[cfg(feature = "cache-aside")]
 pub use multilayer::MultiLayerCache;
+
+/// The common case, in one import.
+///
+/// ```
+/// use mytheclipse_cache::prelude::*;
+/// ```
+///
+/// [`Cache`] is the reason this exists: `MemoryCache::get` and friends are
+/// trait methods, so they are not callable until the trait is in scope.
+pub mod prelude {
+    pub use crate::{Cache, CacheError};
+
+    #[cfg(feature = "cache-aside")]
+    pub use crate::CacheAside;
+    #[cfg(feature = "l1-memory")]
+    pub use crate::MemoryCache;
+    #[cfg(feature = "l1-memory")]
+    pub use crate::MultiLayerCache;
+    #[cfg(feature = "l2-redis")]
+    pub use crate::RedisCache;
+    #[cfg(feature = "typed")]
+    pub use crate::TypedCache;
+}

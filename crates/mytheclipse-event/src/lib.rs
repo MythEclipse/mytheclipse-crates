@@ -34,6 +34,7 @@
 //! fn main() {}
 //! ```
 
+#![deny(missing_docs)]
 pub mod traits;
 
 #[cfg(feature = "mem")]
@@ -61,3 +62,24 @@ pub use amqp::AmqpEventBus;
 
 #[cfg(feature = "nats")]
 pub use nats::NatsEventBus;
+
+/// The common case, in one import.
+///
+/// ```
+/// use mytheclipse_event::prelude::*;
+/// ```
+///
+/// [`EventBus`] is the reason this exists: `subscribe` and `publish` are trait
+/// methods, so they are not callable until the trait is in scope.
+pub mod prelude {
+    pub use crate::{EventBus, EventError, Subscription};
+
+    #[cfg(feature = "amqp")]
+    pub use crate::AmqpEventBus;
+    #[cfg(feature = "mem")]
+    pub use crate::InMemoryEventBus;
+    #[cfg(feature = "nats")]
+    pub use crate::NatsEventBus;
+    #[cfg(feature = "typed")]
+    pub use crate::{Event, TypedEventBus, TypedSubscription};
+}

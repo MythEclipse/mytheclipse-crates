@@ -21,6 +21,7 @@
 //!
 //! Enable the `full` feature to pull in all of the above at once.
 
+#![deny(missing_docs)]
 pub mod context;
 pub mod error;
 
@@ -180,4 +181,49 @@ pub use panic_tracker::{PanicGuard, PanicInfo, PanicTracker};
 /// Bootstraps the global [`EngineContext`].
 pub fn init() -> &'static EngineContext {
     context::init()
+}
+
+/// The common case, in one import.
+///
+/// ```
+/// use mytheclipse::prelude::*;
+/// ```
+///
+/// The traits are the reason this exists. [`Pool`], [`Reconnectable`] and
+/// [`ParallelConcurrency`] must be in scope for their methods to be callable,
+/// and an import list that names only the concrete types compiles right up
+/// until the first method call.
+///
+/// [`init`] is deliberately absent: every primitive lazily sizes its own pool
+/// on first use, so calling it is an optimisation, not setup.
+pub mod prelude {
+    pub use crate::MytheclipseError;
+
+    #[cfg(feature = "bg")]
+    pub use crate::spawn_bg;
+    #[cfg(feature = "io")]
+    pub use crate::spawn_io;
+    #[cfg(feature = "compute")]
+    pub use crate::{compute, compute_join, compute_map, compute_par_for_each, ComputeErrors};
+
+    #[cfg(feature = "resiliency")]
+    pub use crate::{
+        parallel_for_each, parallel_map, parallel_map_unordered, retry, with_timeout,
+        AggregateError, CircuitBreaker, CircuitBreakerConfig, ParallelConcurrency, RetryConfig,
+        RetryExt, ServiceBuilder, ServiceConfig, Timeout,
+    };
+
+    #[cfg(feature = "traffic")]
+    pub use crate::{
+        BackpressureQueue, ConcurrencyLimiter, OverflowPolicy, Pool, RateLimiter, Reconnectable,
+        SemaphorePool,
+    };
+
+    #[cfg(feature = "lifecycle")]
+    pub use crate::{
+        CronSchedule, DistributedLock, HealthRegistry, HealthStatus, ShutdownGuard, ShutdownManager,
+    };
+
+    #[cfg(feature = "observability")]
+    pub use crate::{MetricsCollector, PanicTracker};
 }
