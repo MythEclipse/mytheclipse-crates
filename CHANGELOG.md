@@ -1,3 +1,10 @@
+## [5.1.1](https://github.com/MythEclipse/mytheclipse-crates/compare/v5.1.0...v5.1.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **deps:** stop the auto-merge gate reading its own check run ([0bb558c](https://github.com/MythEclipse/mytheclipse-crates/commit/0bb558cc6b6b77d869c560a58629dc73deb760e6))
+
 # [5.1.0](https://github.com/MythEclipse/mytheclipse-crates/compare/v5.0.0...v5.1.0) (2026-11-03)
 
 
