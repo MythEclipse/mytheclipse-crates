@@ -32,17 +32,17 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
 # RabbitMQ (pure Rust AMQP 0.9.1 client).
-lapin = { version = "2", optional = true }
+lapin = { version = "4", optional = true }
 futures-lite = { version = "2", optional = true }
 
 # NATS (pure Rust client).
-async-nats = { version = "0.38", optional = true }
+async-nats = { version = "0.52", optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 [[bench]]
 name = "event"

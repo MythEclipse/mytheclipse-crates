@@ -21,7 +21,7 @@ async-trait = "0.1"
 [dev-dependencies]
 tokio = { version = "1.53", features = ["full"] }
 tracing-subscriber = "0.3"
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 [features]
 default = []
