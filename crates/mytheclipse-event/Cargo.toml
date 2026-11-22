@@ -36,7 +36,7 @@ lapin = { version = "4", optional = true }
 futures-lite = { version = "2", optional = true }
 
 # NATS (pure Rust client).
-async-nats = { version = "0.52", optional = true }
+async-nats = { version = "0.53", optional = true }
 futures-util = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
 
